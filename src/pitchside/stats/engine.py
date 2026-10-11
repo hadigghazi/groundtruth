@@ -29,7 +29,7 @@ MINUTE = 60_000
 SPRINT_KMH = 25.2
 HSR_KMH = 19.8
 TAG_KMH = 31.0
-RECENT, BASELINE = 8 * MINUTE, 20 * MINUTE  # detector windows: last 8 min against the 20 before
+RECENT, BASELINE = 10 * MINUTE, 20 * MINUTE  # detector windows: last 10 min against the 20 before
 
 
 @dataclass
@@ -661,6 +661,7 @@ class StatsEngine:
             "t": now,
             "score": {t: self.teams[t].goals for t in self.team_ids},
             "teams": {t: self.teams[t].view() for t in self.team_ids},
-            "last_5_min": self.window_metrics(now - RECENT, now),
+            "recent": self.window_metrics(now - RECENT, now),
+            "recent_min": RECENT // MINUTE,
             "control_chaos": self.control_chaos(now - RECENT, now),
         }

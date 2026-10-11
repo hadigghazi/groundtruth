@@ -26,11 +26,11 @@ class Tactics:
 
 # Each label is a set of deltas; results are clamped to [0.05, 0.95].
 LABELS: dict[str, dict[str, float]] = {
-    "high_press": {"press_intensity": 0.40, "line_height": 0.30},
-    "low_block": {"press_intensity": -0.35, "line_height": -0.35},
-    "go_direct": {"directness": 0.40, "tempo": 0.30},
-    "slow_down": {"tempo": -0.35, "directness": -0.25},
-    "push_wide": {"width": 0.40},
+    "high_press": {"press_intensity": 0.50, "line_height": 0.40},
+    "low_block": {"press_intensity": -0.45, "line_height": -0.45},
+    "go_direct": {"directness": 0.50, "tempo": 0.40},
+    "slow_down": {"tempo": -0.45, "directness": -0.30},
+    "push_wide": {"width": 0.50},
 }
 
 

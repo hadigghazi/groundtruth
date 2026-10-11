@@ -3,7 +3,7 @@
 Three disjoint sets of simulated matches:
 
 * noise (no hidden changes): how far each candidate signal drifts on its own
-  between the last 8 minutes and the 20 before;
+  between the last 10 minutes and the 20 before;
 * selection (scripted): how far each signal moves after each kind of change.
   For every cause, the signals that move most relative to their noise are
   kept. A cause's score adds up its signals' standardized moves, and the

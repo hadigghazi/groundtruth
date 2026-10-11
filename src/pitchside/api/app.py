@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import itertools
+import logging
+import os
+from pathlib import Path
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .. import __version__
@@ -74,6 +78,7 @@ async def create_match(req: NewMatch) -> dict:
     s = MatchSession(LEAGUE[req.home], LEAGUE[req.away], seed=req.seed, match_id=match_id,
                      speed=req.speed, scripted=req.scripted)
     sessions[match_id] = s
+    _attach_agents(s)
     s.start()
     return {"match_id": match_id, "meta": s.meta.model_dump(mode="json")}
 
@@ -145,7 +150,7 @@ async def stream(ws: WebSocket, match_id: str) -> None:
     await ws.accept()
     q = s.subscribe()
     try:
-        await ws.send_json({"type": "hello", "meta": s.meta.model_dump(mode="json"),
+        await ws.send_json({"type": "hello", "meta": s.meta.model_dump(mode="json"), "speed": s.speed,
                             "state": s.stats.snapshot(), "cues": [c.model_dump(mode="json")
                                                                   for c in s.producer.sheet("all", "en")[-20:]]})
         if s.last_frame:
@@ -163,3 +168,22 @@ async def stream(ws: WebSocket, match_id: str) -> None:
         pass
     finally:
         s.unsubscribe(q)
+
+
+def _attach_agents(s: MatchSession) -> None:
+    """Agents explain tactical shifts; without them the template cues still air."""
+    if os.environ.get("PITCHSIDE_AGENTS", "1") == "0":
+        return
+    try:
+        from ..agents.hook import attach_agents
+    except ImportError:  # the agents extra is not installed
+        return
+    try:
+        attach_agents(s, budget_s=float(os.environ.get("PITCHSIDE_AGENT_BUDGET_S", "12")))
+    except Exception:  # a misconfigured model must not stop the match
+        logging.getLogger("pitchside").exception("agents not attached")
+
+
+_web = os.environ.get("PITCHSIDE_WEB_DIR")
+if _web and Path(_web).is_dir():  # the built web app, served after every /api route
+    app.mount("/", StaticFiles(directory=_web, html=True), name="web")
