@@ -68,10 +68,13 @@ class WorkerService:
                 self._attach(s)
             self.sessions[mid] = s
             self._active[d.partition].add(mid)
+            log.info("%s on partition %s", mid, d.partition)
         elif kind == "tick":
             s = self.sessions.get(mid)
             if s is not None and not s.finished:
                 s.feed([Event.model_validate(e) for e in msg["events"]], Frame.from_dict(msg["frame"]), msg["frame"])
+                if s.t % 600_000 == 0:
+                    log.info("%s minute %d", mid, s.t // 60_000)
         elif kind == "end":
             s = self.sessions.get(mid)
             if s is not None and not s.finished:
@@ -94,6 +97,7 @@ class WorkerService:
         await s.finish()
         await self._flush(s)
         await self.p.bus.publish("control", s.match_id, [{"type": "agents_done", "match_id": s.match_id}])
+        log.info("%s done: %d agent runs", s.match_id, len(s.agent_runs))
         active = self._active[d.partition]
         active.discard(s.match_id)
         if not active:  # nothing on this partition is still in play: safe to move the checkpoint

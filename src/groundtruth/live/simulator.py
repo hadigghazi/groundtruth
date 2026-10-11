@@ -79,6 +79,7 @@ class SimulatorService:
         meta = m.engine.meta().model_dump(mode="json")
         await self.p.store.upsert([{**doc, "status": "live", "meta": meta, "started": time.time()}])
         await bus.publish("events", mid, [{"type": "meta", "match_id": mid, "meta": meta}])
+        log.info("%s kicked off at speed %g", mid, m.speed)
         wall0, last_send, ticks, pending = time.perf_counter(), time.perf_counter(), 0, []
         pace_from, pace_ticks, pace_speed = wall0, 0, m.speed
         try:
@@ -89,6 +90,8 @@ class SimulatorService:
                                 "events": [e.model_dump(mode="json", exclude_none=True) for e in events]})
                 ticks += 1
                 m.t += 100
+                if ticks % 6000 == 0:
+                    log.info("%s minute %d", mid, m.t // 60_000)
                 if m.speed != pace_speed:  # re-anchor the pacing when the director changes speed
                     pace_from, pace_ticks, pace_speed = time.perf_counter(), ticks, m.speed
                 now = time.perf_counter()
@@ -103,6 +106,7 @@ class SimulatorService:
                     await asyncio.sleep(0)
             pending.append({"type": "end", "match_id": mid, "score": m.engine.score})
             await bus.publish("events", mid, pending)
+            log.info("%s final whistle %s; waiting for the workers", mid, m.engine.score)
             try:
                 await asyncio.wait_for(m.agents_done.wait(), timeout=AGENTS_WAIT_S)
             except asyncio.TimeoutError:
@@ -130,3 +134,4 @@ class SimulatorService:
         ])
         await self.p.broadcaster.send(mid, [{"type": "full_time", "score": m.engine.score, "scorecard": card,
                                              "agents": summarize(runs)}])
+        log.info("%s graded: %d hidden changes, %d agent runs", mid, len(truth), len(runs))

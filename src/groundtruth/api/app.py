@@ -34,6 +34,13 @@ from ..sim.tactics import LABELS
 from .speech import Speech
 
 log = logging.getLogger("groundtruth")
+if not log.handlers:  # our roles say what they are doing; the Azure SDKs only when something is wrong
+    _h = logging.StreamHandler()
+    _h.setFormatter(logging.Formatter("%(asctime)s %(name)s %(levelname)s %(message)s"))
+    log.addHandler(_h)
+    log.setLevel(logging.INFO)
+for _noisy in ("azure", "uamqp"):
+    logging.getLogger(_noisy).setLevel(logging.WARNING)
 LEAGUE = build_league()
 MAX_LIVE = int(os.environ.get("GROUNDTRUTH_MAX_LIVE", "6"))
 DELAY_S = float(os.environ.get("GROUNDTRUTH_DELAY_S", "12"))  # the viewer's broadcast delay, in wall seconds

@@ -48,12 +48,19 @@ def call(path: str, body: dict | None = None):
         return 0, None
 
 
-def wait(what: str, fn, timeout: float):
-    end = time.monotonic() + timeout
+def wait(what: str, fn, timeout: float, mid: str | None = None):
+    end, last = time.monotonic() + timeout, 0.0
     while time.monotonic() < end:
         out = fn()
         if out:
             return out
+        if mid and time.monotonic() - last > 30:
+            last = time.monotonic()
+            _, m = call(f"/api/matches/{mid}")
+            _, tl = call(f"/api/matches/{mid}/overlays?profile=analyst&lang=en")
+            state = (m or {}).get("state") or {}
+            print(f"  {what}: status {(m or {}).get('status')}, clock {state.get('clock_ms', 0) // 60000}', "
+                  f"{len((tl or {}).get('cues', []))} cues so far", flush=True)
         time.sleep(1)
     raise SystemExit(f"timed out waiting for {what}")
 
@@ -86,7 +93,7 @@ def main() -> None:
         # 1. end to end, as fast as the roles go
         _, r = call("/api/matches", {"home": "RVM", "away": "HLB", "seed": 7, "speed": 0})
         mid = r["match_id"]
-        card = wait("full time", lambda: finished(mid), 600)
+        card = wait("full time", lambda: finished(mid), 600, mid)
         _, agents = call(f"/api/matches/{mid}/agents")
         _, timeline = call(f"/api/matches/{mid}/overlays?profile=casual&lang=ar")
         assert agents["runs"] and timeline["cues"], (len(agents["runs"]), len(timeline["cues"]))
@@ -103,7 +110,7 @@ def main() -> None:
         print("worker killed mid-match")
         time.sleep(3)
         procs.append(start("worker", 8003))
-        card2 = wait("full time after the takeover", lambda: finished(mid2), 900)
+        card2 = wait("full time after the takeover", lambda: finished(mid2), 900, mid2)
         _, agents2 = call(f"/api/matches/{mid2}/agents")
         replay = [line for line in open("role-worker-8003.log") if "replaying" in line and mid2 in line]
         print("takeover:", replay[0].strip() if replay else "the new worker had nothing to replay")
