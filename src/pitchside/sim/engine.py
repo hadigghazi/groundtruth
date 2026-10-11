@@ -40,7 +40,7 @@ def _sigmoid(z):
 def true_goal_prob(u: float, v: float, pressured: bool, finishing: float, header: bool = False) -> float:
     """The engine's hidden chance that a shot from (u, v) scores."""
     dist = math.hypot(L - u, W / 2 - v)
-    z = -0.6 - 0.11 * dist + 1.5 * pitch.goal_angle(u, v) - 0.4 * pressured + 1.0 * (finishing - 0.5)
+    z = -0.35 - 0.125 * dist + 1.0 * pitch.goal_angle(u, v) - 0.4 * pressured + 1.0 * (finishing - 0.5)
     return float(_sigmoid(z - (0.7 if header else 0.0)))
 
 
@@ -310,7 +310,7 @@ class MatchEngine:
         opp = self._members(1 - t)
         ou = np.sort(pitch.to_team(self.pos[opp], self.dir[t])[:, 0])
         last_defender = ou[-2] if len(ou) >= 2 else L / 2
-        return max(last_defender, ball_u, L / 2)
+        return max(last_defender - 1.0, ball_u, L / 2)  # attackers keep a metre onside
 
     def _shape(self, t: int, in_poss: bool) -> tuple[np.ndarray, np.ndarray]:
         idx = self._members(t)
@@ -696,8 +696,8 @@ class MatchEngine:
                     p_shoot = 0.6
                 else:
                     blockers = len(self._defenders_in_cone(c))
-                    base = 0.05 if dg < 25.0 else 0.02
-                    p_shoot = float(np.clip(base + 0.7 * q, 0.0, 0.45)) * (0.6 if blockers >= 2 else 1.0)
+                    base = 0.03 if dg < 25.0 else 0.01
+                    p_shoot = float(np.clip(base + 0.55 * q, 0.0, 0.35)) * (0.6 if blockers >= 2 else 1.0)
                 if self.rng.random() < p_shoot:
                     self._shoot(c, now, pressured, q=q, header=header)
                     return
@@ -705,7 +705,7 @@ class MatchEngine:
         opts = self._pass_options(c, pressured, rk)
         held = (now - self.received_ms) / 1000.0
         can_carry = rk is None and not self.is_gk[c]
-        carry_u = 0.015 + 0.004 * self._space_ahead(c) - 0.035 * pressured - 0.012 * held
+        carry_u = 0.015 + 0.004 * self._space_ahead(c) - 0.035 * pressured - 0.012 * held - 0.025 * (u > 75.0)
         utils = np.append(opts["util"], carry_u if can_carry else -np.inf)
         w = np.exp((utils - utils.max()) / 0.03)
         k = int(self.rng.choice(len(utils), p=w / w.sum()))

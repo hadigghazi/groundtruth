@@ -406,7 +406,7 @@ class StatsEngine:
             heights = [s[tid]["height"] for pt, s in shapes if pt == opp and tid in s]
             widths = [s[tid]["width"] for pt, s in shapes if pt == tid and tid in s]
             out[tid] = {
-                "ppda": round(opp_build / my_high, 2) if my_high else None,
+                "ppda": round(opp_build / max(my_high, 1), 2) if opp_build else None,
                 "block_height_m": round(float(np.mean(heights)), 2) if heights else None,
                 "width_m": round(float(np.mean(widths)), 2) if widths else None,
                 "long_pass_share": round(sum(p["long"] for p in mine) / len(mine), 3) if mine else None,
