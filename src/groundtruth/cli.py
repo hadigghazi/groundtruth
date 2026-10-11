@@ -73,6 +73,14 @@ def main(argv: list[str] | None = None) -> None:
     ea.add_argument("--concurrency", type=int, default=4)
     ea.add_argument("--write", type=Path, default=None)
 
+    ld = sub.add_parser("learn-detector", help="train the learned tactical-shift detector and score it against the rule")
+    ld.add_argument("--noise-seeds", type=int, nargs="+", default=list(range(1200, 1230)))
+    ld.add_argument("--train-seeds", type=int, nargs="+", default=list(range(1000, 1150)))
+    ld.add_argument("--select-seeds", type=int, nargs="+", default=list(range(300, 312)))
+    ld.add_argument("--test-seeds", type=int, nargs="+", default=list(range(400, 412)))
+    ld.add_argument("--workers", type=int, default=4)
+    ld.add_argument("--write", type=Path, default=None, help="write the model here (stats/learned.json activates it)")
+
     ae = sub.add_parser("autoevent", help="rebuild passes and shots from positions alone, scored against the event log")
     ae.add_argument("--seeds", type=int, nargs="+", default=[7, 8, 9, 10])
 
@@ -88,6 +96,14 @@ def main(argv: list[str] | None = None) -> None:
         if args.write:
             args.write.write_text(text, encoding="utf-8")
         print(text)
+        return
+
+    if args.cmd == "learn-detector":
+        from .evaluation.learned import learn, write
+        result = learn(args.noise_seeds, args.train_seeds, args.select_seeds, args.test_seeds, workers=args.workers)
+        if args.write:
+            write(result["model"], args.write)
+        print(json.dumps({k: v for k, v in result.items() if k != "model"}, indent=2))
         return
 
     if args.cmd == "autoevent":

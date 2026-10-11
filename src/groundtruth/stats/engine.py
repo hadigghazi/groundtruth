@@ -115,11 +115,18 @@ DEFAULT_THRESHOLDS = {"press_rate": 0.15, "block_height_m": 4.0, "width_m": 3.0,
 
 
 def load_detector_config() -> dict:
-    """The detector settings chosen by `groundtruth detector-report` (see evaluation/detector.py)."""
+    """The detector settings chosen by `groundtruth detector-report` (see evaluation/detector.py), and the
+    learned detector from `groundtruth learn-detector` (evaluation/learned.py) when it has been trained."""
+    files = resources.files("groundtruth.stats")
     try:
-        return json.loads(resources.files("groundtruth.stats").joinpath("detector.json").read_text(encoding="utf-8"))
+        cfg = json.loads(files.joinpath("detector.json").read_text(encoding="utf-8"))
     except FileNotFoundError:
-        return {"thresholds": dict(DEFAULT_THRESHOLDS)}
+        cfg = {"thresholds": dict(DEFAULT_THRESHOLDS)}
+    try:
+        cfg["learned"] = json.loads(files.joinpath("learned.json").read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        pass
+    return cfg
 
 
 class StatsEngine:
@@ -134,6 +141,11 @@ class StatsEngine:
         self.causes = {c: [tuple(s[:2]) for s in sigs] for c, sigs in cfg.get("causes", {}).items()}
         self.signal_sd: dict[str, float] = dict(cfg.get("sd", {}))
         self.score_thresholds: dict[str, float] = dict(cfg.get("score_thresholds", {}))
+        # the learned detector replaces the rule when it is there; the rule's signals still back the verifier
+        self.learned = cfg.get("learned")
+        self._learned_W = np.array(self.learned["W"]) if self.learned else None
+        self._learned_pending: dict[str, int] = {}
+        self._learned_last: dict[str, int] = {}
         self.thresholds = thresholds or dict(cfg.get("thresholds", {}))
         self.team_ids = (meta.home.team_id, meta.away.team_id)
         self.direction = {int(p): d for p, d in meta.direction.items()}
@@ -546,6 +558,9 @@ class StatsEngine:
         if now < RECENT + BASELINE:
             return
         base = self.window_metrics(now - RECENT - BASELINE, now - RECENT)
+        if self.learned:
+            self._detect_learned(base, cur)
+            return
         if self.causes:
             self._detect_causes(base, cur)
             return
@@ -605,9 +620,38 @@ class StatsEngine:
                 self._shift_moment(tid, s, a, b, base, cur, cause=cause, score=score,
                                    contributions={p[1]: round(p[0], 2) for p in parts})
 
+    def _detect_learned(self, base: dict, cur: dict) -> None:
+        """One cause most likely, above the threshold, for two checks running; once per team per gap."""
+        from .learned import drifts, features, probs
+
+        L, W, now = self.learned, self._learned_W, self.t
+        classes, signals = L["classes"], L["signals"]
+        h, a = self.team_ids
+        for tid, opp in ((h, a), (a, h)):
+            x = features(drifts(base, cur, tid, opp, signals), L["sd"], signals)
+            p = probs(W, x)
+            c = int(np.argmax(p[1:])) + 1
+            if p[c] < L["tau"]:
+                self._learned_pending.pop(tid, None)
+                continue
+            if self._learned_pending.get(tid) != c:
+                self._learned_pending[tid] = c
+                continue
+            if now - self._learned_last.get(tid, -10**9) < L.get("gap_min", 10) * MINUTE:
+                continue
+            self._learned_last[tid] = now
+            self._learned_pending.pop(tid, None)
+            # the team's own signal that pushed hardest towards this cause carries the template card
+            pushes = sorted(((W[c, 1 + j] * x[1 + j], s) for j, s in enumerate(signals)), reverse=True)
+            key = next((s for _, s in pushes if base[tid].get(s) is not None and cur[tid].get(s) is not None), None)
+            if key is None:
+                continue
+            self._shift_moment(tid, key, base[tid][key], cur[tid][key], base, cur, cause=classes[c], score=float(p[c]),
+                               probabilities={classes[i]: round(float(p[i]), 3) for i in range(len(classes))})
+
     def _shift_moment(self, tid: str, key: str, a: float, b: float, base: dict, cur: dict,
                       cause: str | None = None, score: float | None = None,
-                      contributions: dict | None = None) -> None:
+                      contributions: dict | None = None, probabilities: dict | None = None) -> None:
         now = self.t
         signals = {}
         for t in self.team_ids:
@@ -625,6 +669,7 @@ class StatsEngine:
                               "rule_cause": cause or self.cause_map.get(f"{key}|{direction}"),
                               "score": round(score, 2) if score is not None else None,
                               "contributions": contributions or {},
+                              **({"probabilities": probabilities} if probabilities else {}),
                               "window_min": RECENT // MINUTE, "baseline_min": BASELINE // MINUTE,
                               "signals": signals})
 
