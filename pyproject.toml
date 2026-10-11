@@ -19,6 +19,7 @@ agents = ["agent-framework-core>=1.21", "agent-framework-openai>=1.16"]
 azure = ["agent-framework-foundry>=1.14", "azure-identity>=1.17", "microsoft-opentelemetry", "aiohttp>=3.9",
          "azure-eventhub>=5.12", "azure-eventhub-checkpointstoreblob-aio>=1.2", "azure-cosmos>=4.7",
          "azure-messaging-webpubsubservice>=1.2"]
+vision = ["opencv-python-headless>=4.9", "torch>=2.2"]
 
 [project.scripts]
 groundtruth = "groundtruth.cli:main"

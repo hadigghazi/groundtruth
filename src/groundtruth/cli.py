@@ -81,6 +81,13 @@ def main(argv: list[str] | None = None) -> None:
     ld.add_argument("--workers", type=int, default=4)
     ld.add_argument("--write", type=Path, default=None, help="write the model here (stats/learned.json activates it)")
 
+    vi = sub.add_parser("vision", help="train the video detector on rendered broadcast frames and grade auto-eventing")
+    vi.add_argument("--train-seeds", type=int, nargs="+", default=[2001, 2002, 2003])
+    vi.add_argument("--test-seeds", type=int, nargs="+", default=[2101, 2102])
+    vi.add_argument("--frames-per-match", type=int, default=900)
+    vi.add_argument("--epochs", type=int, default=18)
+    vi.add_argument("--out", type=Path, default=Path("vision-out"))
+
     ae = sub.add_parser("autoevent", help="rebuild passes and shots from positions alone, scored against the event log")
     ae.add_argument("--seeds", type=int, nargs="+", default=[7, 8, 9, 10])
 
@@ -104,6 +111,11 @@ def main(argv: list[str] | None = None) -> None:
         if args.write:
             write(result["model"], args.write)
         print(json.dumps({k: v for k, v in result.items() if k != "model"}, indent=2))
+        return
+
+    if args.cmd == "vision":
+        from .vision.pipeline import run
+        print(json.dumps(run(args.train_seeds, args.test_seeds, args.frames_per_match, args.epochs, args.out), indent=2))
         return
 
     if args.cmd == "autoevent":

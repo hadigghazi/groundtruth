@@ -21,6 +21,10 @@ on:
         description: "Train the learned detector (about 200 simulated matches) and score it against the rule"
         type: boolean
         default: false
+      vision:
+        description: "Train the video detector on rendered broadcast frames and grade auto-eventing"
+        type: boolean
+        default: false
 
 jobs:
   test:
@@ -232,6 +236,25 @@ jobs:
           path: |
             coefficients.json
             fit-report.json
+
+  vision:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.vision == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - run: pip install -e ".[vision]"
+      - run: set -o pipefail; groundtruth vision --out vision-out | tee vision-out/stdout.json || (mkdir -p vision-out && exit 1)
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vision
+          path: vision-out
 
   learn:
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.learn == 'true'
