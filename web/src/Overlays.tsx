@@ -51,7 +51,10 @@ export function Overlays({ meta, cues, score, period, clockMs, lang, fullTime, s
   const s = strings(lang);
   const by = (layer: Cue["layer"]) =>
     cues.filter((c) => c.layer === layer).sort((a, b) => a.priority - b.priority || b.t_in - a.t_in)[0];
-  const full = by("fullscreen"), lower = by("lower_third"), panel = by("stat_panel"), ticker = by("ticker"), caption = by("caption");
+  // at full time the answer key has the screen to itself, apart from the scorebug
+  const keyUp = fullTime && !!scorecard;
+  const pick = (layer: Cue["layer"]) => (keyUp ? undefined : by(layer));
+  const full = pick("fullscreen"), lower = pick("lower_third"), panel = pick("stat_panel"), ticker = pick("ticker"), caption = pick("caption");
   const h = meta.home, a = meta.away;
   return (
     <div className="gt-overlays" dir={dir(lang)}>
@@ -68,8 +71,8 @@ export function Overlays({ meta, cues, score, period, clockMs, lang, fullTime, s
         {!fullTime && <span className="gt-bug-live">{s.live}</span>}
       </div>
 
-      {fullTime && scorecard ? (
-        <AnswerKey meta={meta} card={scorecard} lang={lang} />
+      {keyUp ? (
+        <AnswerKey meta={meta} card={scorecard!} lang={lang} />
       ) : full && (
         <button key={full.cue_id} className="gt-full gt-wipe" style={{ ["--team" as string]: teamColor(meta, full.team_id) }} onClick={() => onOpen(full)}>
           <span className="gt-full-head">{full.headline}</span>

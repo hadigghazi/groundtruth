@@ -54,7 +54,7 @@ export class MatchBuffer {
         if (m.console) this.console = m.console;
         break;
       case "frame": this.frames.push(m); if (this.frames.length > 24000) this.frames.splice(0, 2000); return; // frames do not re-render React
-      case "event": this.events.push(m.event); this.eventsById.set(m.event.event_id, m.event); break;
+      case "event": { const e = m.derived ? { ...m.event, derived: m.derived } : m.event; this.events.push(e); this.eventsById.set(e.event_id, e); break; }
       case "moment": this.moments.push(m.moment); break;
       case "cue": this.addCue(m.cue); break;
       case "state": this.state = m.state; break;

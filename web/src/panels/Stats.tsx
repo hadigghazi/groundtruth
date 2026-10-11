@@ -1,7 +1,8 @@
 // The live numbers, as split bars: whole match on top, the detector's recent window below.
 
-import type { Lang, MatchMeta, State } from "../api";
+import type { Lang, MatchEvent, MatchMeta, State } from "../api";
 import { dir, fill, strings } from "../i18n";
+import { Momentum, PassNetwork, ShotMap } from "./Analysis";
 
 function Split({ label, a, b, fmt, colors }: { label: string; a: number | null; b: number | null; fmt: (v: number) => string; colors: [string, string] }) {
   const total = (a ?? 0) + (b ?? 0);
@@ -24,7 +25,9 @@ function Split({ label, a, b, fmt, colors }: { label: string; a: number | null; 
 const pct = (v: number) => `${Math.round(100 * v)}%`;
 const one = (v: number) => v.toFixed(1);
 
-export function StatsPanel({ meta, state, lang }: { meta: MatchMeta; state: State | null; lang: Lang }) {
+export function StatsPanel({ matchId, meta, state, events, upTo, lang }: {
+  matchId: string; meta: MatchMeta; state: State | null; events: MatchEvent[]; upTo: number; lang: Lang;
+}) {
   const s = strings(lang);
   if (!state) return null;
   const h = meta.home.team_id, a = meta.away.team_id;
@@ -50,6 +53,9 @@ export function StatsPanel({ meta, state, lang }: { meta: MatchMeta; state: Stat
           <span className="chaos-track" dir="ltr"><span style={{ insetInlineStart: `${state.control_chaos}%` }} /></span>
         </div>
       )}
+      <Momentum matchId={matchId} meta={meta} upTo={upTo} lang={lang} />
+      <ShotMap meta={meta} events={events} lang={lang} />
+      <PassNetwork meta={meta} events={events} lang={lang} />
     </div>
   );
 }

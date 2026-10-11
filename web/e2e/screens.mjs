@@ -44,7 +44,7 @@ await shot("02-broadcast");
 await until("an agent run", async () => (await api(`/api/matches/${id}/agents`)).runs.length > 0, 240);
 await page.waitForTimeout(2000);
 await shot("03-agents");
-await page.getByRole("tab", { name: /Performance/ }).click();
+await page.getByRole("tab", { name: /Metrics/ }).click();
 await shot("04-performance");
 await page.getByRole("tab", { name: /Director/ }).click();
 await shot("05-director");

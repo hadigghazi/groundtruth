@@ -298,6 +298,18 @@ button { font: inherit; }
 .chaos-track { position: relative; display: block; height: 8px; margin-top: 6px; border-radius: 4px; background: linear-gradient(90deg, #4cc9f0, var(--gt-lime), var(--gt-coral)); }
 .chaos-track span { position: absolute; top: -3px; width: 4px; height: 14px; border-radius: 2px; background: #fff; translate: -50% 0; }
 
+.chart { margin: 18px 0 0; }
+.chart figcaption { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; font: 600 12px var(--gt-display);
+  text-transform: uppercase; letter-spacing: 0.14em; color: var(--gt-muted); }
+.mini-pitch { display: block; width: 100%; height: auto; border-radius: 6px; }
+.momentum { display: block; width: 100%; height: 90px; background: var(--gt-surface-2); border-radius: 6px; }
+.chart-key { display: flex; gap: 14px; margin-top: 4px; font-size: 11px; color: var(--gt-muted); }
+.chart-key .dot { display: inline-block; width: 8px; height: 8px; margin-inline-end: 4px; border-radius: 50%; border: 1.5px solid var(--gt-muted); vertical-align: -1px; }
+.chart-key .dot.filled { background: var(--gt-muted); }
+.chart-switch { display: inline-flex; gap: 2px; }
+.chart-switch button { padding: 2px 8px; border: 1px solid var(--gt-line); border-radius: 4px; background: none; color: var(--gt-muted); font: 600 11px var(--gt-display); cursor: pointer; }
+.chart-switch button.on { border-color: var(--gt-lime); color: var(--gt-lime); }
+
 .score-totals { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .score-side { display: grid; gap: 2px; padding: 12px; border: 1px solid var(--gt-line); border-radius: 10px; background: var(--gt-surface-2); }
 .score-side.agents { border-color: rgba(198, 255, 61, 0.35); }

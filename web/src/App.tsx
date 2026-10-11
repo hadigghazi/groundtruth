@@ -114,6 +114,12 @@ function ViewerColumn({ buf, viewer, setViewer, view, getT, slowT, compact, seek
 
 type SideTab = "agents" | "perf" | "director" | "stats" | "score";
 
+/** Events the viewer has already seen: nothing past the playhead reaches the analyst panels. */
+function seenEvents(buf: MatchBuffer, t: number) {
+  const at = buf.timeOfClock();
+  return buf.events.filter((e) => at(e.period, e.clock_ms) <= t);
+}
+
 function MatchScreen({ matchId }: { matchId: string }) {
   const buf = useMemo(() => new MatchBuffer(), [matchId]);
   useSyncExternalStore(buf.subscribe, buf.snapshot);
@@ -200,7 +206,8 @@ function MatchScreen({ matchId }: { matchId: string }) {
             {tab === "agents" && <AgentTrace board={buf.board} meta={meta} moments={buf.moments} langs={langs} lang={lead} />}
             {tab === "perf" && <Performance summary={buf.summary} runs={buf.runs} lang={lead} />}
             {tab === "director" && <Director matchId={matchId} meta={meta} log={buf.console} fullTime={buf.fullTime} outage={buf.outage} lang={lead} />}
-            {tab === "stats" && <StatsPanel meta={meta} state={buf.state} lang={lead} />}
+            {tab === "stats" && <StatsPanel matchId={matchId} meta={meta} state={buf.state} lang={lead} upTo={slow}
+              events={seenEvents(buf, slow)} />}
             {tab === "score" && <ScorecardPanel meta={meta} card={buf.scorecard} lang={lead} />}
           </div>
         </aside>

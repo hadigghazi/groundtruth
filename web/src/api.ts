@@ -13,6 +13,7 @@ export interface MatchEvent {
   event_id: string; seq: number; type: string; period: number; clock_ms: number; end_clock_ms?: number;
   team_id?: string; player_id?: string; x?: number; y?: number; end_x?: number; end_y?: number;
   outcome?: string; receiver_id?: string; restart?: string; card?: string; player_in_id?: string;
+  derived?: { xg?: number; difficulty?: number; distance_m?: number; shot_speed_kmh?: number } | null;
 }
 
 export interface Moment { moment_id: string; kind: string; period: number; clock_ms: number; t: number; team_id?: string | null; player_id?: string | null; salience: number; headline: string; metrics: Record<string, unknown>; evidence: string[] }
@@ -61,7 +62,7 @@ export type StreamMessage =
       board: BoardEntry[]; console: { team_id: string; label: string; t: number; period: number; clock_ms: number }[];
       agents: AgentSummary; runs: AgentRun[]; full_time: Scorecard | null; events?: MatchEvent[]; moments?: Moment[] }
   | Frame
-  | { type: "event"; event: MatchEvent }
+  | { type: "event"; event: MatchEvent; derived?: MatchEvent["derived"] }
   | { type: "moment"; moment: Moment }
   | { type: "cue"; cue: Cue }
   | { type: "state"; state: State }

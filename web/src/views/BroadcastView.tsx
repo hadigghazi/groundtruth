@@ -55,19 +55,24 @@ function crowdTexture(colors: string[]): THREE.CanvasTexture {
   const c = document.createElement("canvas");
   c.width = 512; c.height = 128;
   const g = c.getContext("2d")!;
-  g.fillStyle = "#10151b";
+  g.fillStyle = "#0b0f13";
   g.fillRect(0, 0, c.width, c.height);
-  const palette = [...colors, ...colors, "#d8d8d8", "#2a2f36", "#3b4048", "#c9a27e", "#7a5a44"];
+  // a crowd under floodlights reads as soft texture, not confetti: muted colours, low contrast
+  const mute = (hex: string, k: number) => { const n = parseInt(hex.slice(1), 16); return `rgb(${((n >> 16) & 255) * k | 0},${((n >> 8) & 255) * k | 0},${(n & 255) * k | 0})`; };
+  const palette = [...colors.map((c) => mute(c, 0.5)), ...colors.map((c) => mute(c, 0.38)), "#5a5f66", "#2a2f36", "#3b4048", "#6d5847", "#4a3a2f"];
   for (let row = 0; row < 16; row++) {
+    g.globalAlpha = 0.55 + 0.03 * row; // nearer rows catch more light
     for (let x = 0; x < c.width; x += 4) {
-      if (Math.random() < 0.12) continue; // empty seats
+      if (Math.random() < 0.15) continue; // empty seats
       g.fillStyle = palette[(Math.random() * palette.length) | 0];
       g.fillRect(x + Math.random(), row * 8 + 1 + Math.random() * 2, 3, 4);
     }
   }
+  g.globalAlpha = 1;
   const tex = new THREE.CanvasTexture(c);
   tex.wrapS = THREE.RepeatWrapping;
   tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
   return tex;
 }
 
