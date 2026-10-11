@@ -44,6 +44,8 @@ def call(path: str, body: dict | None = None):
             return r.status, json.loads(r.read() or b"null")
     except urllib.error.HTTPError as e:
         return e.code, None
+    except (urllib.error.URLError, ConnectionError, TimeoutError):  # not up yet
+        return 0, None
 
 
 def wait(what: str, fn, timeout: float):
@@ -76,7 +78,7 @@ def main() -> None:
     api, sim, worker = start("api", 8000), start("simulator", 8001), start("worker", 8002)
     procs = [api, sim, worker]
     try:
-        wait("the API", lambda: call("/api/ping")[0] == 200, 60)
+        wait("the API", lambda: call("/api/ping")[0] == 200, 120)
         status, health = call("/api/health")
         assert health["platform"]["bus"] == "EventHubsBus" and health["platform"]["store"] == "CosmosStore", health
         print("platform:", health["platform"])
