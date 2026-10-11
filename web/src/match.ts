@@ -6,7 +6,8 @@
 // interpolate.
 
 import type {
-  AgentRun, AgentSummary, BoardEntry, Cue, Frame, Lang, MatchEvent, MatchMeta, Mode, Moment, Scorecard, State, StreamMessage,
+  AgentRun, AgentSummary, BoardEntry, Cue, Frame, Lang, MatchEvent, MatchMeta, Mode, Moment, RecapPackage, Scorecard, State,
+  Storyline, StreamMessage,
 } from "./api";
 
 export const MIN_READ_S = 5; // a card stays up at least this long in wall time, whatever the replay speed
@@ -24,6 +25,8 @@ export class MatchBuffer {
   runs: AgentRun[] = [];
   summary: AgentSummary | null = null;
   scorecard: Scorecard | null = null;
+  recap: RecapPackage | null = null;
+  storylines: Storyline[] = [];
   console: { team_id: string; label: string; clock_ms: number; period: number }[] = [];
   fullTime = false;
   outage = false;
@@ -50,6 +53,8 @@ export class MatchBuffer {
         if (m.board) this.board = m.board;
         if (m.runs) this.runs = m.runs;
         if (m.moments) this.moments = m.moments;
+        if (m.storylines) this.storylines = m.storylines;
+        if (m.recap) this.recap = m.recap;
         for (const e of m.events ?? []) if (!this.eventsById.has(e.event_id)) { this.events.push(e); this.eventsById.set(e.event_id, e); }
         if (m.console) this.console = m.console;
         break;
@@ -66,6 +71,12 @@ export class MatchBuffer {
       case "agent_run": this.runs.push(m.run); this.summary = m.summary; break;
       case "console": this.console.push(m); break;
       case "outage": this.outage = m.on; break;
+      case "storyline": {
+        const i = this.storylines.findIndex((x) => x.id === m.storyline.id);
+        if (i >= 0) this.storylines[i] = m.storyline; else this.storylines.push(m.storyline);
+        break;
+      }
+      case "recap": this.recap = m.recap; break;
       case "speed": this.speed = m.speed; break;
       case "full_time": this.fullTime = true; this.scorecard = m.scorecard; this.summary = m.agents; break;
       default: return;

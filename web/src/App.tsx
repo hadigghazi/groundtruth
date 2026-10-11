@@ -113,7 +113,7 @@ function ViewerColumn({ buf, viewer, setViewer, view, getT, slowT, compact, seek
             : <TacticalView meta={meta} getFrame={getFrame} focusPlayer={viewer.player} highlight={evidence} tags={tags} />}
           <Overlays meta={meta} cues={cues} score={buf.scoreAt(slowT)} period={frame?.period ?? 1} clockMs={frame?.clock_ms ?? 0}
             lang={viewer.lang} fullTime={buf.fullTime && slowT >= buf.liveT - 1} scorecard={buf.scorecard}
-            runFor={(id) => buf.runFor(id)} onOpen={setOpen} />
+            runFor={(id) => buf.runFor(id)} onOpen={setOpen} recap={buf.recap} mode={viewer.mode} onClip={seek} />
           {recap && <Recap card={recap} lang={viewer.lang} onClose={() => setRecap(null)} />}
         </div>
         {open && <Evidence cue={open} events={evidence} board={buf.board} langs={langs} lang={viewer.lang} onClose={() => setOpen(null)}
@@ -219,7 +219,7 @@ function MatchScreen({ matchId }: { matchId: string }) {
             {tab === "perf" && <Performance summary={buf.summary} runs={buf.runs} lang={lead} />}
             {tab === "director" && <Director matchId={matchId} meta={meta} log={buf.console} fullTime={buf.fullTime} outage={buf.outage} lang={lead} />}
             {tab === "stats" && <StatsPanel matchId={matchId} meta={meta} state={buf.state} lang={lead} upTo={slow}
-              events={seenEvents(buf, slow)} />}
+              events={seenEvents(buf, slow)} storylines={buf.storylines.filter((x) => x.t <= slow)} />}
             {tab === "ask" && <AskPanel matchId={matchId} getT={getT} lang={lead} />}
             {tab === "score" && <ScorecardPanel meta={meta} card={buf.scorecard} lang={lead} />}
           </div>

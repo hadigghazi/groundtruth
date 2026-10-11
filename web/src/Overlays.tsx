@@ -3,8 +3,10 @@
 // The look is a broadcast package, not app UI: condensed display type, team-colour
 // slabs, wipes in, and a stamp that draws itself when a card is verified.
 
-import type { AgentRun, Cue, Lang, MatchMeta, Scorecard } from "./api";
+import { useState } from "react";
+import type { AgentRun, Cue, Lang, MatchMeta, Mode, RecapPackage, Scorecard } from "./api";
 import { Crest } from "./Crest";
+import { RecapView } from "./RecapView";
 import { clock, dir, fill, minute, strings } from "./i18n";
 
 interface Props {
@@ -18,6 +20,9 @@ interface Props {
   scorecard: Scorecard | null;
   runFor: (momentId?: string | null) => AgentRun | undefined;
   onOpen: (cue: Cue) => void;
+  recap: RecapPackage | null;
+  mode: Mode;
+  onClip: (t: number) => void;
 }
 
 export const fmtMetric = (key: string, v: number | string) => {
@@ -47,8 +52,9 @@ function Stamp({ cue, lang, run }: { cue: Cue; lang: Lang; run?: AgentRun }) {
 const teamColor = (meta: MatchMeta, team?: string | null) =>
   team === meta.away.team_id ? meta.away.colors[0] : team === meta.home.team_id ? meta.home.colors[0] : "#c6ff3d";
 
-export function Overlays({ meta, cues, score, period, clockMs, lang, fullTime, scorecard, runFor, onOpen }: Props) {
+export function Overlays({ meta, cues, score, period, clockMs, lang, fullTime, scorecard, runFor, onOpen, recap, mode, onClip }: Props) {
   const s = strings(lang);
+  const [ftView, setFtView] = useState<"key" | "recap">("key");
   const by = (layer: Cue["layer"]) =>
     cues.filter((c) => c.layer === layer).sort((a, b) => a.priority - b.priority || b.t_in - a.t_in)[0];
   // at full time the answer key has the screen to itself, apart from the scorebug
@@ -71,7 +77,15 @@ export function Overlays({ meta, cues, score, period, clockMs, lang, fullTime, s
         {!fullTime && <span className="gt-bug-live">{s.live}</span>}
       </div>
 
-      {keyUp ? (
+      {keyUp && recap && (
+        <div className="gt-ftswitch">
+          <button className={ftView === "key" ? "on" : ""} onClick={() => setFtView("key")}>{s.answerKeyShort}</button>
+          <button className={ftView === "recap" ? "on" : ""} onClick={() => setFtView("recap")}>{s.recapTitle}</button>
+        </div>
+      )}
+      {keyUp && ftView === "recap" && recap ? (
+        <RecapView meta={meta} recap={recap} lang={lang} mode={mode} onClip={onClip} />
+      ) : keyUp ? (
         <AnswerKey meta={meta} card={scorecard!} lang={lang} />
       ) : full && (
         <button key={full.cue_id} className="gt-full gt-wipe" style={{ ["--team" as string]: teamColor(meta, full.team_id) }} onClick={() => onOpen(full)}>

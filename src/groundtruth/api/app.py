@@ -145,6 +145,7 @@ async def _hello(match_id: str) -> dict | None:
     board = sorted((e for d in await store.query(match_id, "board") for e in d["entries"]), key=lambda e: e["at_ms"])
     runs = await _runs(match_id)
     truth = await store.get(match_id, f"truth-{match_id}") if doc.get("status") == "finished" else None
+    recap = await store.get(match_id, f"recap-{match_id}")
     return {
         "type": "hello", "meta": doc["meta"], "speed": doc.get("speed", 1.0), "delay_s": DELAY_S,
         "state": live.get("state"), "outage": bool(doc.get("outage")), "cues": cues, "board": board[-400:],
@@ -155,6 +156,8 @@ async def _hello(match_id: str) -> dict | None:
                                                                               key=lambda d: d["t"])],
         "moments": [d["moment"] for d in sorted(await store.query(match_id, "moment"), key=lambda d: d["t"])],
         "full_time": truth["scorecard"] if truth else None,
+        "storylines": sorted((_cue(d) for d in await store.query(match_id, "storyline")), key=lambda s: s["t"]),
+        "recap": recap["recap"] if recap else None,
     }
 
 
@@ -301,6 +304,23 @@ async def match_scorecard(match_id: str) -> dict:
 async def truth(match_id: str) -> list[dict]:
     """The answer key. Hidden until full time, so nothing downstream can peek."""
     return (await _truth(match_id))["truth"]
+
+
+@app.get("/api/matches/{match_id}/storylines")
+async def storylines(match_id: str) -> list[dict]:
+    """The running storylines, as they opened and closed."""
+    await _match(match_id)
+    return sorted((_cue(d) for d in await P().store.query(match_id, "storyline")), key=lambda s: s["t"])
+
+
+@app.get("/api/matches/{match_id}/recap")
+async def recap(match_id: str) -> dict:
+    """The full-time package: recap texts per language and viewer, player of the match, highlights rundown."""
+    await _match(match_id)
+    doc = await P().store.get(match_id, f"recap-{match_id}")
+    if doc is None:
+        raise HTTPException(409, "the recap is written at full time")
+    return doc["recap"]
 
 
 @app.get("/api/matches/{match_id}/agents")

@@ -23,6 +23,7 @@ from ..render.templates import LANGS
 from ..schema import Cue, Event, MatchMeta, Moment
 from ..sim.engine import Frame
 from ..stats.engine import BASELINE, MINUTE, RECENT, StatsEngine
+from .storylines import Storylines
 
 MomentHook = Callable[["MatchSession", Moment, list[Cue]], Awaitable[None]]
 FRAME_GAP_S = 0.04  # viewers get at most 25 frames a second; they interpolate
@@ -52,6 +53,9 @@ class MatchSession:
         self.done_moments: set[str] = set()  # moments a previous owner already explained (replay)
         self.minutes: list[dict] = []  # one snapshot a minute, for answers as of a viewer's minute
         self.finished = False
+        self.storylines = Storylines(self)
+        self.recap: dict | None = None
+        self.recap_writer = None  # set by attach_agents; without it the recap is written by code
         self.outbox: list[dict] = []
         self._docs: dict[str, dict] = {}
         self._boards: dict[str, list[dict]] = {}
@@ -182,10 +186,29 @@ class MatchSession:
             snap = self._minute_snapshot()
             self.minutes.append(snap)
             self.doc("snapshot", f"snap-{self.match_id}-{len(self.minutes):03d}", snap)
+            for story in self.storylines.update():
+                self._on_story(story)
         self._ticks += 1
+
+    def _on_story(self, story: dict) -> None:
+        self.doc("storyline", story["id"], story)
+        self.publish({"type": "storyline", "storyline": story})
+        if story["status"] == "active":
+            for cue in self.builder.from_storyline(story):
+                self.place_cue(cue)
+
+    def _recent_xg(self, minutes: int = 15) -> dict[str, float]:
+        if len(self.minutes) <= minutes:
+            return {tid: self.stats.teams[tid].xg for tid in self.stats.team_ids}
+        then = self.minutes[-minutes - 1]["teams"]
+        return {tid: self.stats.teams[tid].xg - then[tid]["xg"] for tid in self.stats.team_ids}
 
     def _on_moment(self, m: Moment) -> None:
         self.publish({"type": "moment", "moment": m.model_dump(mode="json")})
+        if m.kind == "goal" and m.team_id:
+            story = self.storylines.goal(m.team_id, self._recent_xg())
+            if story:
+                self._on_story(story)
         on_air = [c for c in (self.place_cue(cue) for cue in self.builder.from_moment(m)) if c is not None]
         if self.hooks and m.kind in AGENT_KINDS and m.moment_id not in self.done_moments:
             for hook in self.hooks:  # the agents upgrade these cards when they have something verified
@@ -198,4 +221,9 @@ class MatchSession:
         if self._tasks:
             await asyncio.wait(set(self._tasks), timeout=timeout)
         self.publish({"type": "state", "state": self.stats.snapshot()})
+        from ..agents.recap import write_recap
+
+        self.recap = await write_recap(self, self.recap_writer, timeout=timeout)
+        self.doc("recap", f"recap-{self.match_id}", {"recap": self.recap})
+        self.publish({"type": "recap", "recap": self.recap})
         self.finished = True

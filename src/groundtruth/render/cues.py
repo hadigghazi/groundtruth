@@ -107,6 +107,22 @@ class CueBuilder:
                 ))
         return out
 
+    def from_storyline(self, story: dict) -> list[Cue]:
+        """A storyline as it opens: one ticker line per language, its numbers in the evidence pack."""
+        st, out = self.stats, []
+        for lang in self.langs:
+            self._n += 1
+            out.append(Cue(
+                cue_id=f"{st.match_id}-s{self._n:05d}", match_id=st.match_id, t_in=st.t, t_out=st.t + 9000,
+                start=CueTime(period=st.period, clock_ms=st.clock_ms), end=CueTime(period=st.period, clock_ms=st.clock_ms + 9000),
+                layer="ticker", template=f"storyline_{story['kind']}", priority=3, profile="all", lang=lang,
+                team_id=story.get("team_id"), anchor_player_id=None, headline=story["headline"][lang],
+                metrics=[CueMetric(key=k, value=v, team_id=story.get("team_id")) for k, v in story["facts"].items()
+                         if isinstance(v, (int, float))],
+                verified=True, path=["stats", "storylines"],
+            ))
+        return out
+
     def from_moment(self, m: Moment) -> list[Cue]:
         placement = PLACEMENT.get(m.kind)
         if placement is None:

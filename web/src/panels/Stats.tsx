@@ -1,6 +1,6 @@
 // The live numbers, as split bars: whole match on top, the detector's recent window below.
 
-import type { Lang, MatchEvent, MatchMeta, State } from "../api";
+import type { Lang, MatchEvent, MatchMeta, State, Storyline } from "../api";
 import { dir, fill, strings } from "../i18n";
 import { Momentum, PassNetwork, ShotMap } from "./Analysis";
 
@@ -25,8 +25,8 @@ function Split({ label, a, b, fmt, colors }: { label: string; a: number | null; 
 const pct = (v: number) => `${Math.round(100 * v)}%`;
 const one = (v: number) => v.toFixed(1);
 
-export function StatsPanel({ matchId, meta, state, events, upTo, lang }: {
-  matchId: string; meta: MatchMeta; state: State | null; events: MatchEvent[]; upTo: number; lang: Lang;
+export function StatsPanel({ matchId, meta, state, events, upTo, lang, storylines }: {
+  matchId: string; meta: MatchMeta; state: State | null; events: MatchEvent[]; upTo: number; lang: Lang; storylines: Storyline[];
 }) {
   const s = strings(lang);
   if (!state) return null;
@@ -37,6 +37,19 @@ export function StatsPanel({ matchId, meta, state, events, upTo, lang }: {
   const possTotal = Math.max(1, Number(T[h].possession_ms) + Number(T[a].possession_ms));
   return (
     <div className="stats" dir={dir(lang)}>
+      {storylines.length > 0 && (
+        <>
+          <p className="panel-sub">{s.storylinesTitle}</p>
+          <ul className="stories">
+            {[...storylines].reverse().map((st) => (
+              <li key={st.id} className={st.status}
+                style={{ ["--team" as string]: st.team_id === meta.away.team_id ? meta.away.colors[0] : st.team_id === meta.home.team_id ? meta.home.colors[0] : "#c6ff3d" }}>
+                <span className="mono">{st.minute}'</span> {st.headline[lang] ?? st.headline.en}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
       <div className="stats-head" dir="ltr"><span>{meta.home.short_name}</span><span>{meta.away.short_name}</span></div>
       <Split label={s.possession} a={Number(T[h].possession_ms) / possTotal} b={Number(T[a].possession_ms) / possTotal} fmt={pct} colors={colors} />
       <Split label={s.shots} a={num(T[h].shots)} b={num(T[a].shots)} fmt={(v) => String(v)} colors={colors} />

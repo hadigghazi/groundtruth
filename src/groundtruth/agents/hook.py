@@ -48,6 +48,9 @@ def attach_agents(session, kind: str | None = None, budget_s: float = 20.0, use_
                      langs=session.builder.langs, use_judge=use_judge)
     session.board = board
     session.agent_team = team
+    from .recap import RecapWriter
+
+    session.recap_writer = RecapWriter(small)
 
     async def hook(sess, m: Moment, on_air: list[Cue]) -> None:
         mid = m.moment_id

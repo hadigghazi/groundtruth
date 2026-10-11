@@ -107,3 +107,20 @@ def test_the_desk_answers_in_the_viewers_language(played):
     out = asyncio.run(Desk(ScriptedChatClient()).ask(view, "What is the score?", mid, "ar"))
     assert out["verified"] and out["answer"], out
     assert any("؀" <= ch <= "ۿ" for ch in out["answer"])
+
+
+def test_the_full_time_recap_package(played, session):
+    recap = session.recap
+    assert set(recap["texts"]) == {"en", "es", "ar"} and set(recap["written_by"].values()) == {"agents"}
+    for lang, modes in recap["texts"].items():
+        assert set(modes) == {"analyst", "casual"} and all(m["headline"] and m["body"] for m in modes.values())
+    goals = [m for m in session.stats.moments if m.kind == "goal"]
+    clips = [c for c in recap["highlights"] if c["kind"] == "goal"]
+    assert len(clips) == len(goals) and all(c["t_in"] < c["t_out"] and set(c["label"]) == {"en", "es", "ar"} for c in clips)
+    assert recap["player_of_match"]["player"]
+    assert asyncio.run(played.platform.store.get(played.match_id, f"recap-{played.match_id}")) is not None
+
+
+def test_storylines_carry_their_numbers(session):
+    for story in session.storylines.all:
+        assert story["facts"] and set(story["headline"]) == {"en", "es", "ar"}

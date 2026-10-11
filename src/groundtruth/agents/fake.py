@@ -91,7 +91,8 @@ class _ScriptedClient(BaseChatClient):
         kind = task.get("task", "")
         self.calls.append(kind)
         reply = {"tactician": self._tactician, "judge": self._judge, "persona": self._persona,
-                 "recap": self._recap, "ask": self._ask, "challenge": self._challenge}.get(
+                 "recap": self._recap, "ask": self._ask, "challenge": self._challenge,
+                 "full_recap": self._full_recap}.get(
             kind, lambda t: {"error": "unknown task"})(task)
 
         async def respond() -> ChatResponse:
@@ -137,6 +138,14 @@ class _ScriptedClient(BaseChatClient):
                                            after=_fmt(key, claims["after"]["value"]))
         return {"analyst": {"headline": head, "body": analyst}, "casual": {"headline": head, "body": BODY[lang][1]}}
 
+
+    def _full_recap(self, task: dict) -> dict:
+        p, lang = task["pack"], task["lang"]
+        h, a = p["teams"][p["home"]], p["teams"][p["away"]]
+        score = f"{h['short_name']} {h['goals']}-{a['goals']} {a['short_name']}"
+        line = {"en": f"Full time: {score}.", "es": f"Final: {score}.", "ar": f"نهاية المباراة: {score}."}[lang]
+        text = {"headline": score, "body": line, "social": line}
+        return {"analyst": text, "casual": text}
 
     def _challenge(self, task: dict) -> dict:
         ex = task["explanation"]  # the scripted challenger concedes: no better explanation

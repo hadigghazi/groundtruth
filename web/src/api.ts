@@ -57,10 +57,26 @@ export interface Scorecard {
   changes: { team_id: string; label: string; source: string; period: number; clock_ms: number; rule: ScoreRow; agents: ScoreRow }[];
 }
 
+export interface Storyline {
+  id: string; kind: string; team_id?: string | null; player_id?: string | null; t: number; minute: number;
+  status: "active" | "resolved"; facts: Record<string, unknown>; headline: Record<Lang, string>;
+}
+export interface RecapText { headline: string; body: string; social: string }
+export interface Clip { moment_id: string; kind: string; team_id?: string | null; minute: number; t_in: number; t_out: number; label: Record<Lang, string> }
+export interface RecapPackage {
+  texts: Record<Lang, { analyst: RecapText; casual: RecapText }>; written_by: Record<Lang, string>;
+  player_of_match: { player: string; team: string; team_id: string; goals: number; xg: number; shots: number; passes: number;
+    pass_accuracy: number | null; tackles_and_interceptions: number; km: number; top_kmh: number } | null;
+  goals: { minute: number; team: string; player: string }[]; highlights: Clip[];
+}
+
 export type StreamMessage =
   | { type: "hello"; meta: MatchMeta; state: State; cues: Cue[]; speed: number; delay_s: number; outage: boolean;
       board: BoardEntry[]; console: { team_id: string; label: string; t: number; period: number; clock_ms: number }[];
-      agents: AgentSummary; runs: AgentRun[]; full_time: Scorecard | null; events?: MatchEvent[]; moments?: Moment[] }
+      agents: AgentSummary; runs: AgentRun[]; full_time: Scorecard | null; events?: MatchEvent[]; moments?: Moment[];
+      storylines?: Storyline[]; recap?: RecapPackage | null }
+  | { type: "storyline"; storyline: Storyline }
+  | { type: "recap"; recap: RecapPackage }
   | Frame
   | { type: "event"; event: MatchEvent; derived?: MatchEvent["derived"] }
   | { type: "moment"; moment: Moment }

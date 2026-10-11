@@ -83,6 +83,12 @@ await page.getByRole("tab", { name: /Broadcast/ }).click();
 await until("full time", async () => (await api(`/api/matches/${id}`)).finished, 420);
 await page.waitForTimeout(16000); // the broadcast delay, then the answer key
 await shot("11-answer-key");
+if (await page.locator(".gt-ftswitch").count()) {
+  await page.locator(".gt-ftswitch button").nth(1).click();
+  await page.waitForTimeout(800);
+  await shot("11b-recap");
+  await page.locator(".gt-ftswitch button").nth(0).click();
+}
 await page.getByRole("tab", { name: /Scorecard/ }).click();
 await shot("12-scorecard");
 
