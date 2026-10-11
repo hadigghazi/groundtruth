@@ -30,7 +30,8 @@ def test_every_pass_and_shot_is_enriched(played):
         elif e.type == "shot":
             d = stats.derived[e.event_id]
             assert 0.0 < d["xg"] < 1.0
-            assert 25.0 < d["shot_speed_kmh"] < 140.0
+            if d["distance_m"] >= 5.0:
+                assert 25.0 < d["shot_speed_kmh"] < 140.0
 
 
 def test_xg_is_plausible(played):

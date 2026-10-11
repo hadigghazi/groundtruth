@@ -322,7 +322,11 @@ class StatsEngine:
         secs = max((ev.end_clock_ms - ev.clock_ms) / 1000.0, 0.1)
         dist = math.hypot(ev.end_x - ev.x, ev.end_y - ev.y)
         kmh = dist / secs * 3.6
-        self.derived[ev.event_id] = {"xg": round(xg, 3), "shot_speed_kmh": round(kmh, 1), "distance_m": round(dist, 1)}
+        self.derived[ev.event_id] = {"xg": round(xg, 3), "distance_m": round(dist, 1)}
+        if dist >= 5.0:  # a shot blocked at point-blank range has no meaningful speed
+            self.derived[ev.event_id]["shot_speed_kmh"] = round(kmh, 1)
+        else:
+            kmh = 0.0
         ps.shots += 1
         ts.shots += 1
         ps.xg += xg

@@ -83,6 +83,13 @@ def main(argv: list[str] | None = None) -> None:
             for tid, s in r["totals"].items():
                 print("   ", tid, "  ".join(f"{k}={s.get(k, 0):.3g}" for k in keys))
                 print("       ", "  ".join(f"{k}={v}" for k, v in r["diagnostics"][tid].items()))
+            dbg = engine.debug
+            kinds = sorted(k[6:] for k in dbg if k.startswith("shots_"))
+            restarts = " ".join(f"{k[8:]}={int(v)}" for k, v in sorted(dbg.items()) if k.startswith("restart_"))
+            print(f"    in play {dbg['in_play_ticks'] / 600:.1f} min, dead {dbg['dead_ticks'] / 600:.1f} min; {restarts}")
+            print("    shots by kind:", "  ".join(
+                f"{k} n={int(dbg['shots_' + k])} q={dbg['q_' + k] / max(dbg['shots_' + k], 1):.3f} "
+                f"goals={int(dbg['goals_' + k])}" for k in kinds))
             print("    truth:", "; ".join(r["truth"]) or "none")
             print("    out of range:", "; ".join(r["out_of_range"]) or "none")
         return

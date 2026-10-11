@@ -14,6 +14,7 @@ u = 105 (see pitch.py).
 from __future__ import annotations
 
 import math
+from collections import defaultdict
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 
@@ -157,6 +158,8 @@ class MatchEngine:
         self.carry_dir = np.array([1.0, 0.0])
         self.header_ready = False
         self._ids: tuple[str, ...] = ()
+        # calibration counters: never read by the match itself
+        self.debug: dict[str, float] = defaultdict(float)
         self._teleport(self._kickoff_targets(0))
         self._emit("period_start")
         self._set_dead("kickoff", 0, (L / 2, W / 2), 0.0)
@@ -229,6 +232,7 @@ class MatchEngine:
             return [], None
         now = self.clock_ms
         self._apply_changes(now)
+        self.debug["in_play_ticks" if self.state != "dead" else "dead_ticks"] += 1
         ov = _Overrides()
         if self.state == "dead":
             self._tick_dead(now, ov)
@@ -458,6 +462,7 @@ class MatchEngine:
         if self.possession_team != dd.team:
             self.possession_team = dd.team
             self.possession_id += 1
+        self.debug[f"restart_{dd.kind}"] += 1
         self._emit("restart", team_id=self.team_ids[dd.team], player_id=self.pid[k],
                    restart=dd.kind, **self._xy(dd.spot))
         self.state = "owned"
@@ -840,7 +845,7 @@ class MatchEngine:
             gy = rng.uniform(pitch.POST_LOW + 0.3, pitch.POST_HIGH - 0.3)
             if r < p_goal:
                 outcome, end_uv = "goal", (L, gy)
-            elif r < p_goal + (1.0 - p_goal) * 0.42:
+            elif r < p_goal + (1.0 - p_goal) * 0.30:
                 outcome, end_uv = "saved", (L - 0.6, gy)
                 winner = self._gk(1 - t)
             else:
@@ -851,6 +856,10 @@ class MatchEngine:
                     wide = rng.uniform(0.3, 4.0)
                     end_uv = (L, pitch.POST_LOW - wide if rng.random() < 0.5 else pitch.POST_HIGH + wide)
             end = pitch.from_team(np.array(end_uv, dtype=float), d)
+        kind = "penalty" if penalty else ("header" if header else (self.restart_kind or "open_play"))
+        self.debug[f"shots_{kind}"] += 1
+        self.debug[f"q_{kind}"] += q
+        self.debug[f"goals_{kind}"] += outcome == "goal"
         dist = float(np.linalg.norm(end - P))
         steps = max(math.ceil(dist / speed / DT), 2)
         self.flight = Flight(
