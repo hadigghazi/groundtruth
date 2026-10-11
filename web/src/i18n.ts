@@ -2,7 +2,7 @@ import type { Lang } from "./api";
 
 const S = {
   en: {
-    title: "Pitchside", tagline: "Live match intelligence you can check",
+    title: "GroundTruth", tagline: "Match intelligence you can grade",
     newMatch: "Start a match", home: "Home", away: "Away", seed: "Seed", speed: "Speed", hidden: "Hidden tactical changes",
     start: "Kick off", join: "Watch", live: "Live", fullTime: "Full time", delay: "on a {s}s broadcast delay",
     broadcast: "Broadcast", tactical: "Tactical", twoUp: "Side by side", viewer: "Viewer",
@@ -16,7 +16,7 @@ const S = {
     labels: { high_press: "Press high", low_block: "Sit deep", go_direct: "Go direct", slow_down: "Slow it down", push_wide: "Go wide" },
   },
   es: {
-    title: "Pitchside", tagline: "Inteligencia de partido en directo que puedes comprobar",
+    title: "GroundTruth", tagline: "Inteligencia de partido que se puede calificar",
     newMatch: "Empezar un partido", home: "Local", away: "Visitante", seed: "Semilla", speed: "Velocidad", hidden: "Cambios tácticos ocultos",
     start: "Comenzar", join: "Ver", live: "En directo", fullTime: "Final", delay: "con {s} s de retardo",
     broadcast: "Retransmisión", tactical: "Táctica", twoUp: "Lado a lado", viewer: "Espectador",
@@ -30,7 +30,7 @@ const S = {
     labels: { high_press: "Presionar arriba", low_block: "Replegarse", go_direct: "Juego directo", slow_down: "Bajar el ritmo", push_wide: "Abrir el campo" },
   },
   ar: {
-    title: "Pitchside", tagline: "تحليل مباشر للمباراة يمكنك التحقق منه",
+    title: "GroundTruth", tagline: "تحليل للمباراة يمكن قياس صحته",
     newMatch: "ابدأ مباراة", home: "صاحب الأرض", away: "الضيف", seed: "البذرة", speed: "السرعة", hidden: "تغييرات تكتيكية خفية",
     start: "انطلاق", join: "شاهد", live: "مباشر", fullTime: "نهاية المباراة", delay: "بتأخير بث {s} ثانية",
     broadcast: "البث", tactical: "تكتيكي", twoUp: "جنبًا إلى جنب", viewer: "المشاهد",

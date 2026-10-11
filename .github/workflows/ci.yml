@@ -81,7 +81,7 @@ jobs:
       contents: read
     env:
       HAS_AZURE: ${{ secrets.AZURE_CLIENT_ID != '' }}
-      RG: pitchside-rg
+      RG: groundtruth-rg
     steps:
       - uses: actions/checkout@v4
       - name: Not configured yet
@@ -113,14 +113,14 @@ jobs:
           context: .
           target: app
           push: true
-          tags: ${{ env.SERVER }}/pitchside:${{ github.sha }}
+          tags: ${{ env.SERVER }}/groundtruth:${{ github.sha }}
           cache-from: type=gha,scope=app
       - name: Roll out the app
         if: env.HAS_AZURE == 'true'
         run: |
           az deployment group create -g "$RG" -n "app-${{ github.run_number }}" -f infra/main.bicep \
-            -p aiUserRoleId="$AI_USER" appImage="$SERVER/pitchside:${{ github.sha }}" ${{ vars.BICEP_PARAMS }} -o none
-          FQDN=$(az containerapp show -g "$RG" -n pitchside --query properties.configuration.ingress.fqdn -o tsv)
+            -p aiUserRoleId="$AI_USER" appImage="$SERVER/groundtruth:${{ github.sha }}" ${{ vars.BICEP_PARAMS }} -o none
+          FQDN=$(az containerapp show -g "$RG" -n groundtruth --query properties.configuration.ingress.fqdn -o tsv)
           echo "URL=https://$FQDN" >> "$GITHUB_ENV"
           echo "### Live at https://$FQDN" >> "$GITHUB_STEP_SUMMARY"
       - name: Smoke test
@@ -130,7 +130,7 @@ jobs:
             curl -fsS "$URL/api/health" && curl -fsS -o /dev/null "$URL/" && { echo; echo "up at $URL"; exit 0; }
             sleep 6
           done
-          az containerapp logs show -g "$RG" -n pitchside --tail 50 || true
+          az containerapp logs show -g "$RG" -n groundtruth --tail 50 || true
           exit 1
 
   calibrate:
@@ -144,7 +144,7 @@ jobs:
           cache: pip
       - run: pip install -e .
       - name: Simulate and print totals
-        run: pitchside calibrate --seeds ${{ github.event.inputs.seeds || '7 8 9 10' }}
+        run: groundtruth calibrate --seeds ${{ github.event.inputs.seeds || '7 8 9 10' }}
 
   fit:
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.fit == 'true'
@@ -157,7 +157,7 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -e .
-      - run: pitchside fit-models --train 16 --test 4 --workers 4 --write coefficients.json | tee fit-report.json
+      - run: groundtruth fit-models --train 16 --test 4 --workers 4 --write coefficients.json | tee fit-report.json
       - uses: actions/upload-artifact@v4
         with:
           name: models
@@ -176,7 +176,7 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -e .
-      - run: pitchside detector-report --workers 4 --write detector.json | tee detector-report.json
+      - run: groundtruth detector-report --workers 4 --write detector.json | tee detector-report.json
       - uses: actions/upload-artifact@v4
         with:
           name: detector

@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import pytest
 
-from pitchside import pitch
-from pitchside.league import build_league
-from pitchside.sim.engine import MatchEngine
-from pitchside.sim.summary import TYPICAL_PLAYER_KM, player_running, team_totals
+from groundtruth import pitch
+from groundtruth.league import build_league
+from groundtruth.sim.engine import MatchEngine
+from groundtruth.sim.summary import TYPICAL_PLAYER_KM, player_running, team_totals
 
 LEAGUE = build_league()
 

@@ -6,14 +6,14 @@ import asyncio
 
 import pytest
 
-from pitchside.agents.evidence import evidence_pack
-from pitchside.agents.fake import ScriptedChatClient
-from pitchside.agents.hook import InsightBoard
-from pitchside.agents.pipeline import AgentTeam
-from pitchside.agents.schemas import Claim, Insight
-from pitchside.agents.verify import check_insight
-from pitchside.schema import Moment
-from pitchside.stats.engine import BASELINE, RECENT
+from groundtruth.agents.evidence import evidence_pack
+from groundtruth.agents.fake import ScriptedChatClient
+from groundtruth.agents.hook import InsightBoard
+from groundtruth.agents.pipeline import AgentTeam
+from groundtruth.agents.schemas import Claim, Insight
+from groundtruth.agents.verify import check_insight
+from groundtruth.schema import Moment
+from groundtruth.stats.engine import BASELINE, RECENT
 
 
 @pytest.fixture(scope="module")

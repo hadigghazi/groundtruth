@@ -21,7 +21,7 @@ from ..sim.tactics import LABELS
 LEAGUE = build_league()
 MAX_LIVE = 6
 
-app = FastAPI(title="Pitchside API", version=__version__)
+app = FastAPI(title="GroundTruth API", version=__version__)
 sessions: dict[str, MatchSession] = {}
 _ids = itertools.count(1)
 
@@ -172,19 +172,19 @@ async def stream(ws: WebSocket, match_id: str) -> None:
 
 def _attach_agents(s: MatchSession) -> None:
     """Agents explain tactical shifts; without them the template cues still air."""
-    if os.environ.get("PITCHSIDE_AGENTS", "1") == "0":
+    if os.environ.get("GROUNDTRUTH_AGENTS", "1") == "0":
         return
     try:
         from ..agents.hook import attach_agents
     except ImportError:  # the agents extra is not installed
         return
     try:
-        attach_agents(s, budget_s=float(os.environ.get("PITCHSIDE_AGENT_BUDGET_S", "12")))
+        attach_agents(s, budget_s=float(os.environ.get("GROUNDTRUTH_AGENT_BUDGET_S", "12")))
     except Exception:  # a misconfigured model must not stop the match
-        logging.getLogger("pitchside").exception("agents not attached")
+        logging.getLogger("groundtruth").exception("agents not attached")
 
 
-_web = os.environ.get("PITCHSIDE_WEB_DIR")
+_web = os.environ.get("GROUNDTRUTH_WEB_DIR")
 if _web and Path(_web).is_dir():  # the built web app, served after every /api route
     app.mount("/", StaticFiles(directory=_web, html=True), name="web")
 
@@ -196,4 +196,4 @@ if os.environ.get("APPLICATIONINSIGHTS_CONNECTION_STRING"):
 
         use_microsoft_opentelemetry(enable_azure_monitor=True)
     except Exception:
-        logging.getLogger("pitchside").exception("telemetry not configured")
+        logging.getLogger("groundtruth").exception("telemetry not configured")

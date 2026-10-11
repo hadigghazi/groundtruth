@@ -109,7 +109,7 @@ function MatchScreen({ matchId }: { matchId: string }) {
   return (
     <div className="match">
       <header className="topbar">
-        <a href="#" className="brand">Pitchside</a>
+        <a href="#" className="brand">GroundTruth</a>
         <span className="fixture">{buf.meta.home.name} v {buf.meta.away.name} · {buf.meta.venue}</span>
         <div className="seg">
           <button className={view === "broadcast" ? "on" : ""} onClick={() => setView("broadcast")}>{s.broadcast}</button>
@@ -151,7 +151,7 @@ function Home({ onGo }: { onGo: (id: string) => void }) {
   };
   return (
     <div className="home">
-      <h1>Pitchside</h1>
+      <h1>GroundTruth</h1>
       <p className="tagline">{s.tagline}</p>
       <section className="card">
         <h2>{s.newMatch}</h2>

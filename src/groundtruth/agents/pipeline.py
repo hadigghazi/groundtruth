@@ -273,7 +273,7 @@ class AgentTeam:
         personas = [Persona(self.writers[lang], lang, self.stats, self.board) for lang in self.langs]
         collector = Collector()
         fallback = Fallback(self.board)
-        return (WorkflowBuilder(start_executor=tactician, name="pitchside-insight")
+        return (WorkflowBuilder(start_executor=tactician, name="groundtruth-insight")
                 .add_edge(tactician, verifier)
                 .add_edge(verifier, tactician, condition=lambda m: isinstance(m, Job))
                 .add_edge(verifier, producer, condition=lambda m: isinstance(m, Approved))

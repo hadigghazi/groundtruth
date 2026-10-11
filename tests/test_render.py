@@ -7,10 +7,10 @@ from collections import defaultdict
 
 import pytest
 
-from pitchside.render.cues import CueBuilder
-from pitchside.render.producer import CAPACITY, Producer
-from pitchside.render.templates import LANGS
-from pitchside.schema import Cue
+from groundtruth.render.cues import CueBuilder
+from groundtruth.render.producer import CAPACITY, Producer
+from groundtruth.render.templates import LANGS
+from groundtruth.schema import Cue
 
 ARABIC = re.compile(r"[؀-ۿ]")
 

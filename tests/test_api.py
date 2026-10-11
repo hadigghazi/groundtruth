@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from pitchside.api.app import app
+from groundtruth.api.app import app
 
 
 def test_health_and_league():

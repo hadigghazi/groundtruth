@@ -1,7 +1,7 @@
 """Logistic models for pass completion and shot conversion.
 
 Fitted by iteratively reweighted least squares on simulated training matches
-(`pitchside fit-models`) and stored as plain coefficients, so serving needs
+(`groundtruth fit-models`) and stored as plain coefficients, so serving needs
 nothing but numpy.
 """
 
@@ -78,7 +78,7 @@ COEF_FILE = "coefficients.json"
 
 def load_models(path: Path | None = None) -> dict[str, Logistic]:
     if path is None:
-        text = resources.files("pitchside.stats").joinpath(COEF_FILE).read_text(encoding="utf-8")
+        text = resources.files("groundtruth.stats").joinpath(COEF_FILE).read_text(encoding="utf-8")
     else:
         text = Path(path).read_text(encoding="utf-8")
     raw = json.loads(text)

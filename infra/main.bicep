@@ -1,6 +1,6 @@
-// Everything Pitchside runs on, in one resource group. Deployed by CI on every push to main.
+// Everything GroundTruth runs on, in one resource group. Deployed by CI on every push to main.
 //
-//   Container Apps environment ── pitchside app (API, agents, web; one replica: live sessions
+//   Container Apps environment ── groundtruth app (API, agents, web; one replica: live sessions
 //   │                              are in memory)
 //   ├── Log Analytics + Application Insights (traces from Agent Framework, logs)
 //   Microsoft Foundry account + project ── two model deployments (Tactician; judge and writers)
@@ -37,7 +37,7 @@ param budgetAmount int = 60
 var budgetStart = '2026-10-01' // a budget's start date cannot change once created
 
 var suffix = uniqueString(resourceGroup().id)
-var name = 'pitchside'
+var name = 'groundtruth'
 var tags = { app: name, purpose: 'inside-the-game-hackathon' }
 
 var roles = {
@@ -149,7 +149,7 @@ resource project 'Microsoft.CognitiveServices/accounts/projects@2025-06-01' = {
   tags: tags
   identity: { type: 'SystemAssigned' }
   properties: {
-    displayName: 'Pitchside studio'
+    displayName: 'GroundTruth studio'
     description: 'Agents that explain live football moments'
   }
 }
@@ -241,15 +241,15 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = if (!empty(appImage)) {
           image: appImage
           resources: { cpu: json('0.5'), memory: '1Gi' }
           env: [
-            { name: 'PITCHSIDE_LLM', value: 'foundry' }
+            { name: 'GROUNDTRUTH_LLM', value: 'foundry' }
             { name: 'FOUNDRY_PROJECT_ENDPOINT', value: projectEndpoint }
-            { name: 'PITCHSIDE_MODEL_LARGE', value: large.name }
-            { name: 'PITCHSIDE_MODEL_SMALL', value: small.name }
+            { name: 'GROUNDTRUTH_MODEL_LARGE', value: large.name }
+            { name: 'GROUNDTRUTH_MODEL_SMALL', value: small.name }
             { name: 'AZURE_CLIENT_ID', value: identity.properties.clientId } // DefaultAzureCredential picks this identity
             { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: insights.properties.ConnectionString }
             { name: 'EVENTHUB_FQDN', value: '${eventHubs.name}.servicebus.windows.net' }
             { name: 'EVENTHUB_NAME', value: matchFeed.name }
-            { name: 'PITCHSIDE_AGENT_BUDGET_S', value: '12' }
+            { name: 'GROUNDTRUTH_AGENT_BUDGET_S', value: '12' }
           ]
           probes: [
             { type: 'Liveness', httpGet: { path: '/api/health', port: 8000 }, periodSeconds: 30 }

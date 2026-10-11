@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from pitchside.sim.summary import player_running
+from groundtruth.sim.summary import player_running
 
 
 def test_goal_moments_match_goals(played):

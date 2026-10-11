@@ -1,4 +1,4 @@
-// Wire types (mirrors src/pitchside/schema.py) and the REST/WebSocket client.
+// Wire types (mirrors src/groundtruth/schema.py) and the REST/WebSocket client.
 
 export type Lang = "en" | "es" | "ar";
 export type Mode = "analyst" | "casual";

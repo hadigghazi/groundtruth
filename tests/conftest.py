@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import pytest
 
-from pitchside.league import build_league
-from pitchside.sim.engine import MatchEngine
-from pitchside.stats.engine import StatsEngine
-from pitchside.stats.replay import run_live
+from groundtruth.league import build_league
+from groundtruth.sim.engine import MatchEngine
+from groundtruth.stats.engine import StatsEngine
+from groundtruth.stats.replay import run_live
 
 
 @pytest.fixture(scope="session")

@@ -1,4 +1,4 @@
-"""Command line: `pitchside simulate`, `pitchside batch`, `pitchside league`."""
+"""Command line: `groundtruth simulate`, `groundtruth batch`, `groundtruth league`."""
 
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ def report(engine, events, frames) -> dict:
 
 
 def main(argv: list[str] | None = None) -> None:
-    ap = argparse.ArgumentParser(prog="pitchside")
+    ap = argparse.ArgumentParser(prog="groundtruth")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     s = sub.add_parser("simulate", help="simulate one match")

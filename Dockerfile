@@ -24,16 +24,16 @@ COPY web/ ./
 RUN npm run build
 
 FROM python:3.12-slim AS app
-ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PITCHSIDE_WEB_DIR=/app/web
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 GROUNDTRUTH_WEB_DIR=/app/web
 WORKDIR /app
 COPY pyproject.toml README.md ./
 COPY src ./src
-RUN pip install --no-cache-dir ".[api,agents,azure]" && useradd --create-home --uid 10001 pitchside
+RUN pip install --no-cache-dir ".[api,agents,azure]" && useradd --create-home --uid 10001 groundtruth
 COPY --from=web /web/dist ./web
-USER pitchside
+USER groundtruth
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health')"
-CMD ["uvicorn", "pitchside.api.app:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "groundtruth.api.app:app", "--host", "0.0.0.0", "--port", "8000"]
 
 FROM python:3.12-slim AS runtime
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
@@ -41,4 +41,4 @@ WORKDIR /app
 COPY pyproject.toml README.md ./
 COPY src ./src
 RUN pip install --no-cache-dir .
-ENTRYPOINT ["pitchside"]
+ENTRYPOINT ["groundtruth"]

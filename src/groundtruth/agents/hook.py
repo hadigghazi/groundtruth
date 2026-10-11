@@ -43,20 +43,20 @@ def attach_agents(session, kind: str | None = None, budget_s: float = 12.0, use_
     async def hook(sess, m: Moment) -> None:
         t0 = time.perf_counter()
         outcome = None
-        with get_tracer().start_as_current_span("pitchside.explain_moment") as span:
-            span.set_attribute("pitchside.match_id", m.match_id)
-            span.set_attribute("pitchside.moment_id", m.moment_id)
-            span.set_attribute("pitchside.rule_cause", str(m.metrics.get("rule_cause")))
+        with get_tracer().start_as_current_span("groundtruth.explain_moment") as span:
+            span.set_attribute("groundtruth.match_id", m.match_id)
+            span.set_attribute("groundtruth.moment_id", m.moment_id)
+            span.set_attribute("groundtruth.rule_cause", str(m.metrics.get("rule_cause")))
             try:
                 outcome = await asyncio.wait_for(team.explain(m), timeout=budget_s)
             except asyncio.TimeoutError:
                 board(m.moment_id, "fallback", reasons=[f"no verified insight within {budget_s:g} s"])
             except Exception as e:  # never let an agent failure touch the match
                 board(m.moment_id, "fallback", reasons=[f"{type(e).__name__}: {e}"])
-            span.set_attribute("pitchside.verified", bool(outcome and outcome.insight))
+            span.set_attribute("groundtruth.verified", bool(outcome and outcome.insight))
             if outcome and outcome.insight:
-                span.set_attribute("pitchside.cause", outcome.insight.cause)
-                span.set_attribute("pitchside.attempts", outcome.attempts)
+                span.set_attribute("groundtruth.cause", outcome.insight.cause)
+                span.set_attribute("groundtruth.attempts", outcome.attempts)
         sess.latencies_ms.append(round(1000 * (time.perf_counter() - t0)))
         cues = []
         if outcome is not None and outcome.insight is not None:

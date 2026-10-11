@@ -115,9 +115,9 @@ DEFAULT_THRESHOLDS = {"press_rate": 0.15, "block_height_m": 4.0, "width_m": 3.0,
 
 
 def load_detector_config() -> dict:
-    """The detector settings chosen by `pitchside detector-report` (see evaluation/detector.py)."""
+    """The detector settings chosen by `groundtruth detector-report` (see evaluation/detector.py)."""
     try:
-        return json.loads(resources.files("pitchside.stats").joinpath("detector.json").read_text(encoding="utf-8"))
+        return json.loads(resources.files("groundtruth.stats").joinpath("detector.json").read_text(encoding="utf-8"))
     except FileNotFoundError:
         return {"thresholds": dict(DEFAULT_THRESHOLDS)}
 
@@ -536,7 +536,7 @@ class StatsEngine:
         self._detect_momentum(cur)
         self._detect_chaos(cc)
 
-    # The signals the detector watches. Their thresholds come from `pitchside detector-report
+    # The signals the detector watches. Their thresholds come from `groundtruth detector-report
     # --write-thresholds`, which measures how far each one drifts on matches with no hidden change.
     SIGNALS = ("press_rate", "ppda", "def_action_height_m", "high_turnovers", "line_height_m", "block_height_m",
                "block_height_adj_m", "width_m", "width_adj_m", "long_pass_share", "forward_share", "time_on_ball_s")

@@ -7,10 +7,10 @@
 # infra/main.bicep. Safe to run again.
 set -euo pipefail
 
-REPO="hadigghazi/pitchside"
+REPO="hadigghazi/groundtruth"
 LOCATION="${LOCATION:-swedencentral}"
-RG="${RG:-pitchside-rg}"
-APP_NAME="pitchside-github-deploy"
+RG="${RG:-groundtruth-rg}"
+APP_NAME="groundtruth-github-deploy"
 
 SUB=$(az account show --query id -o tsv)
 TENANT=$(az account show --query tenantId -o tsv)

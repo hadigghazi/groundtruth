@@ -68,7 +68,7 @@ def _fmt(key: str, v: float) -> str:
 
 
 class _ScriptedClient(BaseChatClient):
-    OTEL_PROVIDER_NAME: ClassVar[str] = "PitchsideScripted"
+    OTEL_PROVIDER_NAME: ClassVar[str] = "GroundTruthScripted"
 
     def __init__(self, *, bad_first_draft: bool = False, **kwargs: Any) -> None:
         super().__init__(**kwargs)
@@ -92,7 +92,7 @@ class _ScriptedClient(BaseChatClient):
 
         async def respond() -> ChatResponse:
             return ChatResponse(messages=[Message(role="assistant", contents=[json.dumps(reply, ensure_ascii=False)])],
-                                model="pitchside-scripted", response_id=f"scripted-{len(self.calls)}")
+                                model="groundtruth-scripted", response_id=f"scripted-{len(self.calls)}")
         return respond()
 
     def _tactician(self, task: dict) -> dict:
@@ -138,4 +138,4 @@ class ScriptedChatClient(  # type: ignore[misc]
 ):
     """The scripted client with the same tool, middleware and telemetry layers as a real one."""
 
-    OTEL_PROVIDER_NAME: ClassVar[str] = "PitchsideScripted"
+    OTEL_PROVIDER_NAME: ClassVar[str] = "GroundTruthScripted"
