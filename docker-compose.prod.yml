@@ -1,0 +1,19 @@
+# Used on the VM. Pulls the image GitHub Actions built; nothing is built on the server.
+#   docker compose -f docker-compose.prod.yml up -d
+# .env (written by the deploy job):
+#   PITCHSIDE_LLM=scripted|openai|foundry, OPENAI_API_KEY, PITCHSIDE_MODEL_LARGE/SMALL
+services:
+  app:
+    image: ghcr.io/hadigghazi/pitchside:latest
+    container_name: pitchside
+    ports:
+      - "127.0.0.1:8082:8000"   # Caddy on the VM owns :80/:443 and forwards pitchside.hadighazi.com here
+    environment:
+      PITCHSIDE_LLM: ${PITCHSIDE_LLM:-scripted}
+      PITCHSIDE_MODEL_LARGE: ${PITCHSIDE_MODEL_LARGE:-}
+      PITCHSIDE_MODEL_SMALL: ${PITCHSIDE_MODEL_SMALL:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      PITCHSIDE_AGENT_BUDGET_S: ${PITCHSIDE_AGENT_BUDGET_S:-12}
+    mem_limit: 1g   # the VM has little memory headroom; a live match needs a few hundred MB
+    restart: unless-stopped

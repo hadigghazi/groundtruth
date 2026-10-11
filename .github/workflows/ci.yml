@@ -60,6 +60,69 @@ jobs:
           cache-from: type=gha,scope=app
           cache-to: type=gha,scope=app,mode=max
 
+  deploy:
+    # Staging on dblp-vm until the Azure deployment exists. Skips itself until the VM secrets are set.
+    needs: [test, image]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    concurrency: deploy-vm-pitchside
+    permissions:
+      contents: read
+      packages: read
+    env:
+      HAS_HOST: ${{ secrets.VM_HOST != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Not configured yet
+        if: env.HAS_HOST != 'true'
+        run: echo "VM_HOST secret is not set - skipping deploy. The image is on GHCR."
+      - name: Prepare SSH
+        if: env.HAS_HOST == 'true'
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.VM_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.VM_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+      - name: Copy compose file
+        if: env.HAS_HOST == 'true'
+        run: |
+          ssh -i ~/.ssh/deploy_key "${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}" 'mkdir -p ~/pitchside'
+          scp -i ~/.ssh/deploy_key docker-compose.prod.yml "${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}:~/pitchside/docker-compose.prod.yml"
+      - name: Pull and restart
+        if: env.HAS_HOST == 'true'
+        run: |
+          ssh -i ~/.ssh/deploy_key "${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}" bash -s <<'EOF'
+            set -e
+            cd ~/pitchside
+            touch .env
+            set_env() {
+              [ -n "$2" ] || return 0
+              grep -v "^$1=" .env > .env.next || true
+              echo "$1=$2" >> .env.next
+              mv .env.next .env
+            }
+            set_env OPENAI_API_KEY '${{ secrets.OPENAI_API_KEY }}'
+            set_env PITCHSIDE_LLM '${{ vars.PITCHSIDE_LLM }}'
+            set_env PITCHSIDE_MODEL_LARGE '${{ vars.PITCHSIDE_MODEL_LARGE }}'
+            set_env PITCHSIDE_MODEL_SMALL '${{ vars.PITCHSIDE_MODEL_SMALL }}'
+            chmod 600 .env
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+            docker compose -f docker-compose.prod.yml pull
+            docker compose -f docker-compose.prod.yml up -d --remove-orphans
+            docker logout ghcr.io
+            docker image prune -f >/dev/null
+          EOF
+      - name: Smoke test
+        if: env.HAS_HOST == 'true'
+        run: |
+          ssh -i ~/.ssh/deploy_key "${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}" bash -s <<'EOF'
+            for i in $(seq 1 30); do
+              curl -fsS http://127.0.0.1:8082/api/health && curl -fsS -o /dev/null http://127.0.0.1:8082/ && { echo; echo "pitchside is up"; exit 0; }
+              sleep 2
+            done
+            docker logs --tail 50 pitchside; exit 1
+          EOF
+
   calibrate:
     runs-on: ubuntu-latest
     timeout-minutes: 20
