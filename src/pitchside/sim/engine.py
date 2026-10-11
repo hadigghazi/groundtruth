@@ -38,11 +38,17 @@ def _sigmoid(z):
     return 1.0 / (1.0 + np.exp(-z))
 
 
-def true_goal_prob(u: float, v: float, pressured: bool, finishing: float, header: bool = False) -> float:
-    """The engine's hidden chance that a shot from (u, v) scores."""
+def true_goal_prob(u: float, v: float, pressured: bool, finishing: float, header: bool = False,
+                   keeper_gap: float = 99.0) -> float:
+    """The engine's hidden chance that a shot from (u, v) scores.
+
+    A keeper who has come out to within a few metres of the shooter covers
+    most of the goal, so `keeper_gap` (metres) scales the chance down.
+    """
     dist = math.hypot(L - u, W / 2 - v)
     z = -0.35 - 0.125 * dist + 1.0 * pitch.goal_angle(u, v) - 0.4 * pressured + 1.0 * (finishing - 0.5)
-    return float(_sigmoid(z - (0.7 if header else 0.0)))
+    q = float(_sigmoid(z - (0.7 if header else 0.0)))
+    return q * float(np.clip(0.35 + 0.1 * keeper_gap, 0.35, 1.0))
 
 
 def _value(uv: np.ndarray) -> np.ndarray:
@@ -331,10 +337,17 @@ class MatchEngine:
         u = 22.0 + (u0 - 22.0) * depth + shift
         v = W / 2 + (v0 - W / 2) * width + pull * (bv - W / 2)
         gk = self.is_gk[idx]
+        gk_u = np.clip(3.0 + 0.06 * bu, 2.0, 14.0)
+        gk_v = W / 2 + 0.2 * (bv - W / 2)
+        ball_dist = math.hypot(bu, bv - W / 2)
+        if not in_poss and ball_dist < 20.0:
+            # the keeper comes off the line towards a ball carrier who is close to goal
+            reach = min(0.35, 7.0 / max(ball_dist, 1e-6))
+            gk_u, gk_v = max(bu * reach, 1.0), W / 2 + (bv - W / 2) * reach
         # Out of possession the back line holds near the box edge until the ball is close.
         floor = 5.0 if in_poss else float(np.clip(bu - 8.0, 11.0, 20.0))
-        u = np.where(gk, np.clip(3.0 + 0.06 * bu, 2.0, 14.0), np.clip(u, floor, 101.0))
-        v = np.where(gk, W / 2 + 0.2 * (bv - W / 2), np.clip(v, 2.0, W - 2.0))
+        u = np.where(gk, gk_u, np.clip(u, floor, 101.0))
+        v = np.where(gk, gk_v, np.clip(v, 2.0, W - 2.0))
         if in_poss:
             u = np.where(gk, u, np.minimum(u, self._offside_line(t, bu)))
         return idx, pitch.from_team(np.stack([u, v], axis=1), d)
@@ -665,11 +678,15 @@ class MatchEngine:
             self.yellow[j] = True
             self._emit("card", team_id=self.team_ids[o], player_id=self.pid[j], card="yellow", **self._xy(loc))
         u, v = pitch.to_team(loc, self.dir[t])
-        if pitch.in_box(u, v) and self.rng.random() < 0.5:
+        if pitch.in_box(u, v) and self.rng.random() < 0.3:
             spot = pitch.from_team(np.array([L - 11.0, W / 2]), self.dir[t])
             self._set_dead("penalty", t, spot, self.rng.uniform(40, 70))
         else:
             self._set_dead("free_kick", t, loc, self.rng.uniform(12, 28))
+
+    def _nearest_opponent(self, c: int) -> float:
+        opp = self._members(1 - int(self.team[c]))
+        return float(np.linalg.norm(self.pos[opp] - self.pos[c], axis=1).min())
 
     def _space_ahead(self, c: int) -> float:
         t = int(self.team[c])
@@ -683,7 +700,7 @@ class MatchEngine:
 
     def _decision_delay(self, c: int, pressured: bool) -> int:
         tempo = self.tactics[self.team[c]].tempo
-        s = self.rng.uniform(1.0, 3.0) * (1.25 - 0.5 * tempo) * (0.6 if pressured else 1.0)
+        s = self.rng.uniform(1.2, 3.4) * (1.25 - 0.5 * tempo) * (0.6 if pressured else 1.0)
         return int(s * 1000)
 
     def _decide(self, c: int, now: int, pressured: bool) -> None:
@@ -693,7 +710,8 @@ class MatchEngine:
             dg = math.hypot(L - u, W / 2 - v)
             if dg < 30.0:
                 header = self.header_ready
-                q = true_goal_prob(u, v, pressured, self.finishing[c], header=header)
+                keeper_gap = float(np.linalg.norm(self.pos[self._gk(1 - self.team[c])] - self.pos[c]))
+                q = true_goal_prob(u, v, pressured, self.finishing[c], header=header, keeper_gap=keeper_gap)
                 if rk == "free_kick":
                     p_shoot = 0.35 if dg < 28.0 and abs(v - W / 2) < 15.0 else 0.0
                     q *= 0.55
@@ -703,6 +721,8 @@ class MatchEngine:
                     blockers = len(self._defenders_in_cone(c))
                     base = 0.03 if dg < 25.0 else 0.01
                     p_shoot = float(np.clip(base + 0.55 * q, 0.0, 0.35)) * (0.6 if blockers >= 2 else 1.0)
+                    if pitch.in_box(u, v) and self._nearest_opponent(c) < 2.0:
+                        p_shoot *= 0.6  # a tight marker in the box
                 if self.rng.random() < p_shoot:
                     self._shoot(c, now, pressured, q=q, header=header)
                     return
@@ -829,7 +849,8 @@ class MatchEngine:
         if penalty:
             q = float(np.clip(0.76 + 0.12 * (self.finishing[c] - 0.5), 0.6, 0.9))
         elif q is None:
-            q = true_goal_prob(u, v, pressured, self.finishing[c], header=header)
+            keeper_gap = float(np.linalg.norm(self.pos[self._gk(1 - t)] - P))
+            q = true_goal_prob(u, v, pressured, self.finishing[c], header=header, keeper_gap=keeper_gap)
         rng = self.rng
         speed = rng.uniform(11.0, 16.0) if header else float(np.clip(rng.normal(25.5, 3.5), 15.0, 36.0))
         cone = [] if penalty else self._defenders_in_cone(c)
