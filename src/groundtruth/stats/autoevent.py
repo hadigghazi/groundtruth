@@ -5,9 +5,7 @@ ball is low and within reach of one player. Between two holders the ball was kic
 
 * same team, different player: a completed pass, timed at the passer's last touch;
 * the ball leaves the field across an end line near the goal, or reaches the opposing
-  goalkeeper, fast, after a kick from shooting range: a shot;
-* a fast ball towards goal from range, stopped by an outfield opponent within half a
-  second: a blocked shot.
+  goalkeeper, fast, after a kick from shooting range: a shot.
 
 Scored against the engine's event log (which never feeds this module), this measures
 how much of the event feed a tracking-only provider could reconstruct.
@@ -28,8 +26,6 @@ LOW_M = 1.2
 SHOT_SPEED = 13.0   # m/s: faster than this towards goal from range reads as a shot
 SHOT_RANGE_M = 35.0
 GOAL_HALF_M = 11.0  # an end-line crossing this close to the goal centre counts as on the goal side
-BLOCK_MS = 600      # a shot charged down arrives at a defender this fast
-BLOCK_SPEED = 16.0
 MATCH_MS = {"pass": 1500, "shot": 2500}
 
 
@@ -59,9 +55,6 @@ def detect(frames, team_of: dict[str, str], keepers: set[str]) -> dict[str, list
                 passes.append({"player_id": last[0], "receiver_id": holder, "period": f.period, "clock_ms": last[2]})
             elif holder in keepers and not shot_open and _fast_towards_goal(last, flight):
                 shots.append({"player_id": last[0], "period": last[1], "clock_ms": last[2]})  # a save
-            elif (not shot_open and f.clock_ms - last[2] <= BLOCK_MS and _speed(flight) >= BLOCK_SPEED
-                  and _fast_towards_goal(last, flight)):
-                shots.append({"player_id": last[0], "period": last[1], "clock_ms": last[2]})  # blocked
         last = (holder, f.period, f.clock_ms, float(b[0]), float(b[1]))
         flight, shot_open = [], False
     return {"pass": passes, "shot": shots}
