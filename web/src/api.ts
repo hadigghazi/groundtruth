@@ -28,6 +28,9 @@ export interface Cue {
   replaces?: string[];
 }
 
+/** km, top km/h, km/h now, passes, completed, shots, goals */
+export type PlayerLine = [number, number, number, number, number, number, number];
+
 export interface BoardEntry { moment_id: string; stage: string; at_ms: number; [k: string]: unknown }
 
 export interface TeamWindow { [metric: string]: number | null }
@@ -81,7 +84,7 @@ export type StreamMessage =
   | { type: "event"; event: MatchEvent; derived?: MatchEvent["derived"] }
   | { type: "moment"; moment: Moment }
   | { type: "cue"; cue: Cue }
-  | { type: "state"; state: State }
+  | { type: "state"; state: State; players?: Record<string, PlayerLine> }
   | { type: "board"; entry: BoardEntry }
   | { type: "console"; team_id: string; label: string; t: number; period: number; clock_ms: number }
   | { type: "full_time"; score: number[]; scorecard: Scorecard; agents: AgentSummary }

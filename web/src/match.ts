@@ -6,13 +6,13 @@
 // interpolate.
 
 import type {
-  AgentRun, AgentSummary, BoardEntry, Cue, Frame, Lang, MatchEvent, MatchMeta, Mode, Moment, RecapPackage, Scorecard, State,
+  PlayerLine, AgentRun, AgentSummary, BoardEntry, Cue, Frame, Lang, MatchEvent, MatchMeta, Mode, Moment, RecapPackage, Scorecard, State,
   Storyline, StreamMessage,
 } from "./api";
 
 export const MIN_READ_S = 5; // a card stays up at least this long in wall time, whatever the replay speed
 
-export interface Viewer { mode: Mode; lang: Lang; club: string | null; player: string | null }
+export interface Viewer { mode: Mode; lang: Lang; club: string | null; player: string | null; metric?: string | null; cam?: boolean }
 
 export class MatchBuffer {
   meta: MatchMeta | null = null;
@@ -27,6 +27,8 @@ export class MatchBuffer {
   scorecard: Scorecard | null = null;
   recap: RecapPackage | null = null;
   storylines: Storyline[] = [];
+  /** every state the stream sent, so panels can show the match as of the playhead, not the live edge */
+  states: { t: number; state: State; players?: Record<string, PlayerLine> }[] = [];
   console: { team_id: string; label: string; clock_ms: number; period: number }[] = [];
   fullTime = false;
   outage = false;
@@ -47,6 +49,7 @@ export class MatchBuffer {
     switch (m.type) {
       case "hello":
         this.meta = m.meta; this.state = m.state; this.speed = m.speed; this.delayS = m.delay_s ?? 12;
+        if (m.state) this.states.push({ t: m.state.t, state: m.state });
         this.outage = !!m.outage; this.summary = m.agents ?? null; this.scorecard = m.full_time ?? null;
         this.fullTime = !!m.full_time;
         m.cues.forEach((c) => this.addCue(c));
@@ -66,7 +69,11 @@ export class MatchBuffer {
       }
       case "moment": this.moments.push(m.moment); break;
       case "cue": this.addCue(m.cue); break;
-      case "state": this.state = m.state; break;
+      case "state":
+        this.state = m.state;
+        this.states.push({ t: m.state.t, state: m.state, players: m.players });
+        if (this.states.length > 3000) this.states.splice(0, 500);
+        break;
       case "board": this.board.push(m.entry); break;
       case "agent_run": this.runs.push(m.run); this.summary = m.summary; break;
       case "console": this.console.push(m); break;
@@ -171,6 +178,13 @@ export class MatchBuffer {
       if (v.club && c.team_id && c.team_id !== v.club && c.priority >= 3 && c.layer !== "fullscreen") return false;
       return true;
     });
+  }
+
+  /** The latest state at or before play time t (the live state when nothing older is held). */
+  stateAt(t: number) {
+    let best: (typeof this.states)[number] | undefined;
+    for (const s of this.states) { if (s.t > t) break; best = s; }
+    return best;
   }
 
   /** The run that produced a verified cue, for "verified in 3.4 s". */

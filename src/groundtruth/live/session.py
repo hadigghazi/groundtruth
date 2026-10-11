@@ -148,6 +148,11 @@ class MatchSession:
             best = snap
         return best
 
+    def _players(self) -> dict[str, list]:
+        """Each player's running numbers, compact: km, top km/h, km/h now, passes, completed, shots, goals."""
+        return {pid: [round(p.km, 2), round(p.top_kmh, 1), round(p.speed_kmh, 1), p.passes, p.passes_complete,
+                      p.shots, p.goals] for pid, p in self.stats.players.items()}
+
     def _minute_snapshot(self) -> dict:
         st = self.stats
         now = st.t
@@ -180,7 +185,7 @@ class MatchSession:
             self._frame_wall = now
             self.publish({"type": "frame", "t": self.stats.t, **(frame_dict or frame.to_dict())})
         if self._ticks % 50 == 0:
-            self.publish({"type": "state", "state": self.stats.snapshot()})
+            self.publish({"type": "state", "state": self.stats.snapshot(), "players": self._players()})
         if self.stats.t >= self._next_minute:
             self._next_minute += MINUTE
             snap = self._minute_snapshot()

@@ -253,6 +253,18 @@ button { font: inherit; }
 .stories li.resolved { opacity: 0.55; }
 @container (max-width: 700px) { .rv-grid { grid-template-columns: 1fr; } .rv-head { font-size: 22px; } }
 
+.gt-focus { position: absolute; top: 58px; left: 14px; width: 236px; padding: 8px 10px; display: grid; gap: 4px;
+  background: var(--gt-panel); backdrop-filter: blur(6px); border-inline-start: 3px solid var(--gt-lime); }
+.gt-focus-title { font: 700 12px var(--gt-display); text-transform: uppercase; letter-spacing: 0.12em; color: var(--gt-muted); }
+.gt-focus-chart { width: 100%; height: 56px; }
+.gt-focus-now { display: flex; justify-content: space-between; font: 700 17px var(--gt-display); font-variant-numeric: tabular-nums; }
+.gt-hud { position: absolute; right: 16px; bottom: 44px; width: 250px; padding: 8px 12px 10px; display: grid; gap: 6px;
+  background: var(--gt-panel); backdrop-filter: blur(6px); border-top: 3px solid var(--team); }
+.gt-hud-name { display: flex; align-items: center; gap: 6px; font: 700 19px var(--gt-display); text-transform: uppercase; }
+.gt-hud-name b { color: var(--gt-lime); }
+.gt-hud-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px 8px; font: 500 13px var(--gt-display); color: var(--gt-soft); }
+.gt-hud-grid b { display: block; font: 700 19px var(--gt-display); color: var(--gt-text); font-variant-numeric: tabular-nums; }
+
 .player-tag { position: absolute; top: 0; left: 0; display: grid; padding: 3px 8px 4px; background: var(--gt-panel); border-inline-start: 3px solid var(--gt-lime);
   font: 700 14px/1.1 var(--gt-display); text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap; color: var(--gt-text); }
 .player-tag span { font: 600 12px var(--gt-display); color: var(--gt-lime); text-transform: none; font-variant-numeric: tabular-nums; }

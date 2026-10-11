@@ -3,12 +3,13 @@ import {
 } from "@fluentui/react-components";
 import {
   Bot20Regular, Chat20Regular, Cube20Regular, DataBarVertical20Regular, Gauge20Regular, Grid20Regular, History20Regular, Map20Regular,
-  Settings20Regular, Speaker220Regular, SpeakerMute20Regular, SplitVertical20Regular, Square20Regular, Trophy20Regular,
+  Camera20Regular, Settings20Regular, Speaker220Regular, SpeakerMute20Regular, SplitVertical20Regular, Square20Regular, Trophy20Regular,
 } from "@fluentui/react-icons";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { api, openStream } from "./api";
 import type { Club, Cue, Frame, Lang, Mode } from "./api";
 import { Crest } from "./Crest";
+import { METRICS, MetricFocus, PlayerHud } from "./Focus";
 import { LANG_LABEL, dir, fill, strings } from "./i18n";
 import { MatchBuffer, type Viewer } from "./match";
 import { usePlayhead } from "./playhead";
@@ -98,6 +99,20 @@ function ViewerColumn({ buf, viewer, setViewer, view, getT, slowT, compact, seek
             icon={voice ? <Speaker220Regular /> : <SpeakerMute20Regular />} />
         </Tooltip>
         {!compact && (
+          <Dropdown className="vb-dd" size="small" appearance="filled-darker" aria-label={s.metricWord}
+            value={`${s.metricWord}: ${viewer.metric ? METRICS[viewer.metric].label[viewer.lang] : s.noMetric}`}
+            selectedOptions={[viewer.metric ?? ""]} onOptionSelect={(_, d) => setViewer({ ...viewer, metric: d.optionValue || null })}>
+            <Option value="">{s.noMetric}</Option>
+            {Object.entries(METRICS).map(([k, m]) => <Option key={k} value={k}>{m.label[viewer.lang]}</Option>)}
+          </Dropdown>
+        )}
+        {viewer.player && view === "broadcast" && (
+          <Tooltip content={s.playerCam} relationship="label">
+            <ToggleButton size="small" appearance="subtle" checked={!!viewer.cam} icon={<Camera20Regular />}
+              onClick={() => setViewer({ ...viewer, cam: !viewer.cam })} />
+          </Tooltip>
+        )}
+        {!compact && (
           <Dropdown className="vb-dd" size="small" appearance="filled-darker" aria-label={s.player}
             value={`${s.player}: ${playerName(viewer.player)}`} selectedOptions={[viewer.player ?? ""]}
             onOptionSelect={(_, d) => setViewer({ ...viewer, player: d.optionValue || null })}>
@@ -109,12 +124,16 @@ function ViewerColumn({ buf, viewer, setViewer, view, getT, slowT, compact, seek
       <div className="stage" dir="ltr">
         <div className="frame">
           {view === "broadcast"
-            ? <BroadcastView meta={meta} getFrame={getFrame} tags={tags} focusPlayer={viewer.player} compact={compact} />
+            ? <BroadcastView meta={meta} getFrame={getFrame} tags={tags} focusPlayer={viewer.player} compact={compact}
+                followPlayer={viewer.cam ? viewer.player : null} />
             : <TacticalView meta={meta} getFrame={getFrame} focusPlayer={viewer.player} highlight={evidence} tags={tags} />}
           <Overlays meta={meta} cues={cues} score={buf.scoreAt(slowT)} period={frame?.period ?? 1} clockMs={frame?.clock_ms ?? 0}
             lang={viewer.lang} fullTime={buf.fullTime && slowT >= buf.liveT - 1} scorecard={buf.scorecard}
             runFor={(id) => buf.runFor(id)} onOpen={setOpen} recap={buf.recap} mode={viewer.mode} onClip={seek} />
           {recap && <Recap card={recap} lang={viewer.lang} onClose={() => setRecap(null)} />}
+          {viewer.metric && !buf.fullTime && <MetricFocus buf={buf} meta={meta} metric={viewer.metric} upTo={slowT} lang={viewer.lang} />}
+          {viewer.player && !compact && <PlayerHud meta={meta} line={buf.stateAt(slowT)?.players?.[viewer.player]}
+            playerId={viewer.player} lang={viewer.lang} />}
         </div>
         {open && <Evidence cue={open} events={evidence} board={buf.board} langs={langs} lang={viewer.lang} onClose={() => setOpen(null)}
           onReplay={() => { seek(open.t_in - 15_000); setOpen(null); }} />}
@@ -218,7 +237,7 @@ function MatchScreen({ matchId }: { matchId: string }) {
             {tab === "agents" && <AgentTrace board={buf.board} meta={meta} moments={buf.moments} langs={langs} lang={lead} />}
             {tab === "perf" && <Performance summary={buf.summary} runs={buf.runs} lang={lead} />}
             {tab === "director" && <Director matchId={matchId} meta={meta} log={buf.console} fullTime={buf.fullTime} outage={buf.outage} lang={lead} />}
-            {tab === "stats" && <StatsPanel matchId={matchId} meta={meta} state={buf.state} lang={lead} upTo={slow}
+            {tab === "stats" && <StatsPanel matchId={matchId} meta={meta} state={buf.stateAt(slow)?.state ?? null} lang={lead} upTo={slow}
               events={seenEvents(buf, slow)} storylines={buf.storylines.filter((x) => x.t <= slow)} />}
             {tab === "ask" && <AskPanel matchId={matchId} getT={getT} lang={lead} />}
             {tab === "score" && <ScorecardPanel meta={meta} card={buf.scorecard} lang={lead} />}

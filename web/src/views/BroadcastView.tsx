@@ -11,6 +11,7 @@ interface Props {
   tags: React.MutableRefObject<Tag[]>;
   focusPlayer: string | null;
   compact?: boolean; // several views on screen: render cheaper
+  followPlayer?: string | null; // player cam: the camera tracks this player instead of the ball
 }
 
 const PX = 14; // texture pixels per metre
@@ -100,11 +101,13 @@ function boardTexture(): THREE.CanvasTexture {
 /** Engine metres -> scene units: x along the pitch, the main stand (y = 0) nearest the camera. */
 const toScene = (x: number, y: number) => new THREE.Vector3(x - L / 2, 0, W / 2 - y);
 
-export function BroadcastView({ meta, getFrame, tags, focusPlayer, compact = false }: Props) {
+export function BroadcastView({ meta, getFrame, tags, focusPlayer, compact = false, followPlayer = null }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const tagLayer = useRef<HTMLDivElement>(null);
   const focus = useRef(focusPlayer);
   focus.current = focusPlayer;
+  const follow = useRef(followPlayer);
+  follow.current = followPlayer;
   const [lost, setLost] = useState(false);
 
   useEffect(() => {
@@ -293,10 +296,12 @@ export function BroadcastView({ meta, getFrame, tags, focusPlayer, compact = fal
         }
         for (const [pid, rec] of meshes) if (!seen.has(pid)) { scene.remove(rec.g); meshes.delete(pid); }
         const bp = toScene(f.ball[0], f.ball[1]);
+        const tracked = follow.current ? meshes.get(follow.current)?.g.position : undefined;
+        const aim = tracked ? new THREE.Vector3(0.75 * tracked.x + 0.25 * bp.x, 0, 0.75 * tracked.z + 0.25 * bp.z) : bp;
         ball.position.set(bp.x, 0.24 + f.ball[2], bp.z);
         ballShadow.position.set(bp.x, 0.02, bp.z);
         // aim a little short of the ball's line, so the pitch, not the stand, fills the frame
-        const target = new THREE.Vector3(THREE.MathUtils.clamp(bp.x, -L / 2 + 20, L / 2 - 20), 0, bp.z * 0.45 + 5);
+        const target = new THREE.Vector3(THREE.MathUtils.clamp(aim.x, -L / 2 + 20, L / 2 - 20), 0, aim.z * 0.45 + 5);
         look.lerp(target, 0.05);
         camera.position.set(look.x * 0.9, 19, W / 2 + 32);
         camera.lookAt(look);

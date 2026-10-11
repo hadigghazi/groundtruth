@@ -51,6 +51,16 @@ await shot("05-director");
 await page.getByRole("tab", { name: /Stats/ }).click();
 await shot("06-stats");
 
+try {  // the personal overlays: one metric to watch, a player to follow, the player cam
+  await page.getByRole("combobox", { name: "Watch" }).first().click();
+  await page.getByRole("option", { name: "Possession" }).click();
+  await page.getByRole("combobox", { name: "Follow" }).first().click();
+  await page.getByRole("option").nth(4).click();
+  await page.getByRole("button", { name: "Camera follows the player" }).first().click();
+  await page.waitForTimeout(4000);
+  await shot("06b-focus");
+} catch (e) { console.log("focus step skipped:", e.message); }
+
 await until("a stat panel on screen", async () => (await page.locator(".gt-panel").count()) > 0, 200);
 await shot("07-stat-panel");
 if (await page.locator(".gt-panel").count()) {
