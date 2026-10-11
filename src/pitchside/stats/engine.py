@@ -11,9 +11,11 @@ restarts at 45:00 in the second half, so it cannot be used for windows).
 
 from __future__ import annotations
 
+import json
 import math
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
+from importlib import resources
 
 import numpy as np
 
@@ -27,7 +29,7 @@ MINUTE = 60_000
 SPRINT_KMH = 25.2
 HSR_KMH = 19.8
 TAG_KMH = 31.0
-RECENT, BASELINE = 5 * MINUTE, 15 * MINUTE  # detector windows: last 5 min against the 15 before
+RECENT, BASELINE = 8 * MINUTE, 20 * MINUTE  # detector windows: last 8 min against the 20 before
 
 
 @dataclass
@@ -96,11 +98,25 @@ class _Window:
         return [it for ts, it in self.items if lo < ts <= hi]
 
 
+DEFAULT_THRESHOLDS = {"press_rate": 0.15, "block_height_m": 4.0, "width_m": 3.0,
+                      "long_pass_share": 0.08, "time_on_ball_s": 0.5}
+
+
+def load_thresholds() -> dict[str, float]:
+    try:
+        raw = resources.files("pitchside.stats").joinpath("detector.json").read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return dict(DEFAULT_THRESHOLDS)
+    return {**DEFAULT_THRESHOLDS, **json.loads(raw)["thresholds"]}
+
+
 class StatsEngine:
-    def __init__(self, meta: MatchMeta, models: dict[str, Logistic] | None = None):
+    def __init__(self, meta: MatchMeta, models: dict[str, Logistic] | None = None,
+                 thresholds: dict[str, float] | None = None):
         self.meta = meta
         self.match_id = meta.match_id
         self.models = models or load_models()
+        self.thresholds = thresholds or load_thresholds()
         self.team_ids = (meta.home.team_id, meta.away.team_id)
         self.direction = {int(p): d for p, d in meta.direction.items()}
         self.people = {p.player_id: (team.team_id, p) for team in (meta.home, meta.away) for p in team.lineup + team.bench}
@@ -119,7 +135,9 @@ class StatsEngine:
         self._poss_since = 0
         self._streak = (None, 0, [])  # team, completed passes in a row, their event ids
         keep = RECENT + BASELINE + MINUTE
-        self.w = {k: _Window(keep) for k in ("pass", "def", "shot", "box", "poss", "shape", "zone", "action")}
+        self.w = {k: _Window(keep) for k in ("pass", "def", "shot", "box", "poss", "shape", "zone", "action",
+                                             "press", "tob")}
+        self._last_reception: tuple[str, str, int, int] | None = None  # team, player, clock_ms, period
         self.series: dict[str, dict[str, list[tuple[int, float]]]] = defaultdict(lambda: defaultdict(list))
         self.derived: dict[str, dict[str, float]] = {}
         self.moments: list[Moment] = []
@@ -237,7 +255,8 @@ class StatsEngine:
         sample = {}
         for tid, pts in by_team.items():
             uv = np.array(pts)
-            sample[tid] = {"height": float(uv[:, 0].mean()),
+            ball_u = team_xy(float(f.ball[0]), float(f.ball[1]), self._dir(tid))[0]
+            sample[tid] = {"height": float(uv[:, 0].mean()), "ball_u": ball_u,
                            "width": float(np.percentile(uv[:, 1], 90) - np.percentile(uv[:, 1], 10))}
         self.w["shape"].add(self.t, (self.poss_team, sample))
         bx, by = float(f.ball[0]), float(f.ball[1])
@@ -268,6 +287,9 @@ class StatsEngine:
         self.poss_team = ev.team_id or self.poss_team
 
     def _on_pass(self, ev: Event) -> None:
+        self._time_on_ball(ev)
+        if ev.outcome == "complete":
+            self._last_reception = (ev.team_id, ev.receiver_id, ev.end_clock_ms, ev.period)
         tid, ps, ts = ev.team_id, self.players[ev.player_id], self.teams[ev.team_id]
         d = self._dir(tid, ev.period)
         feats = pass_features(ev, d, self._opp_xy(ev))
@@ -314,6 +336,7 @@ class StatsEngine:
             self.w["box"].add(self.t, ev.team_id)
 
     def _on_shot(self, ev: Event) -> None:
+        self._time_on_ball(ev)
         tid, ps, ts = ev.team_id, self.players[ev.player_id], self.teams[ev.team_id]
         if ev.restart == "penalty":
             xg = 0.76
@@ -375,6 +398,17 @@ class StatsEngine:
 
     def _on_pressure(self, ev: Event) -> None:
         self.players[ev.player_id].pressures += 1
+        u, _ = team_xy(ev.x, ev.y, self._dir(ev.team_id, ev.period))
+        self.w["press"].add(self.t, {"team": ev.team_id, "high": u > 42.0})
+
+    def _time_on_ball(self, ev: Event) -> None:
+        """Seconds between receiving a pass and playing the next one: the purest read of tempo."""
+        last = self._last_reception
+        if last and last[1] == ev.player_id and last[3] == ev.period:
+            dt = (ev.clock_ms - last[2]) / 1000.0
+            if 0.0 < dt < 15.0:
+                self.w["tob"].add(self.t, (ev.team_id, dt))
+        self._last_reception = None
 
     def _on_restart(self, ev: Event) -> None:
         if ev.restart == "corner":
@@ -399,22 +433,29 @@ class StatsEngine:
         shapes = self.w["shape"].between(lo, hi)
         shots = self.w["shot"].between(lo, hi)
         boxes = self.w["box"].between(lo, hi)
+        presses = self.w["press"].between(lo, hi)
+        tob = self.w["tob"].between(lo, hi)
         out = {}
         ft_total = sum(p["final_third"] for p in passes) or None
+        midfield = lambda s, tid: tid in s and 35.0 <= s[tid]["ball_u"] <= 70.0  # noqa: E731
         for tid in self.team_ids:
             opp = self.other(tid)
             mine = [p for p in passes if p["team"] == tid]
             opp_build = sum(p["own60"] for p in passes if p["team"] == opp)
             my_high = sum(d["high"] for d in defs if d["team"] == tid)
+            my_press = sum(p["high"] for p in presses if p["team"] == tid)
             poss_s = sum(1 for pt, _ in shapes if pt == tid)
-            heights = [s[tid]["height"] for pt, s in shapes if pt == opp and tid in s]
-            widths = [s[tid]["width"] for pt, s in shapes if pt == tid and tid in s]
+            # Shape is read only with the ball in midfield, so where the ball is does not swamp the signal.
+            heights = [s[tid]["height"] for pt, s in shapes if pt == opp and midfield(s, tid)]
+            widths = [s[tid]["width"] for pt, s in shapes if pt == tid and midfield(s, tid)]
+            touches = [dt for team, dt in tob if team == tid]
             out[tid] = {
                 "ppda": round(opp_build / max(my_high, 1), 2) if opp_build else None,
-                "block_height_m": round(float(np.mean(heights)), 2) if heights else None,
-                "width_m": round(float(np.mean(widths)), 2) if widths else None,
-                "long_pass_share": round(sum(p["long"] for p in mine) / len(mine), 3) if mine else None,
-                "passes_per_min_in_possession": round(len(mine) / (poss_s / 60.0), 2) if poss_s > 30 else None,
+                "press_rate": round(my_press / opp_build, 3) if opp_build >= 10 else None,
+                "block_height_m": round(float(np.mean(heights)), 2) if len(heights) >= 30 else None,
+                "width_m": round(float(np.mean(widths)), 2) if len(widths) >= 30 else None,
+                "long_pass_share": round(sum(p["long"] for p in mine) / len(mine), 3) if len(mine) >= 15 else None,
+                "time_on_ball_s": round(float(np.mean(touches)), 2) if len(touches) >= 10 else None,
                 "pass_accuracy": round(sum(p["complete"] for p in mine) / len(mine), 3) if mine else None,
                 "field_tilt": round(sum(p["final_third"] for p in mine) / ft_total, 3) if ft_total else None,
                 "threat": round(sum(x for t, x in shots if t == tid) + 0.05 * sum(b == tid for b in boxes), 3),
@@ -454,14 +495,9 @@ class StatsEngine:
         self._detect_momentum(cur)
         self._detect_chaos(cc)
 
-    # Thresholds are starting values; `pitchside calibrate` tunes them on training matches.
-    SHIFT_RULES = {
-        "ppda": {"rel": 0.40, "abs": 2.5},
-        "block_height_m": {"rel": 0.0, "abs": 3.0},
-        "width_m": {"rel": 0.0, "abs": 3.0},
-        "long_pass_share": {"rel": 0.0, "abs": 0.08},
-        "passes_per_min_in_possession": {"rel": 0.18, "abs": 1.5},
-    }
+    # The signals the detector watches. Their thresholds come from `pitchside detector-report
+    # --write-thresholds`, which measures how far each one drifts on matches with no hidden change.
+    SIGNALS = ("press_rate", "block_height_m", "width_m", "long_pass_share", "time_on_ball_s")
 
     def _detect_shifts(self, cur: dict) -> None:
         now = self.t
@@ -469,12 +505,12 @@ class StatsEngine:
             return
         base = self.window_metrics(now - RECENT - BASELINE, now - RECENT)
         for tid in self.team_ids:
-            for key, rule in self.SHIFT_RULES.items():
+            for key in self.SIGNALS:
                 a, b = base[tid].get(key), cur[tid].get(key)
                 if a is None or b is None:
                     continue
                 delta = b - a
-                big = abs(delta) >= rule["abs"] and (rule["rel"] == 0.0 or abs(delta) >= rule["rel"] * abs(a))
+                big = abs(delta) >= self.thresholds[key]
                 k = (tid, key)
                 if not big:
                     self._pending_shift.pop(k, None)
@@ -493,7 +529,7 @@ class StatsEngine:
         now = self.t
         signals = {}
         for t in self.team_ids:
-            for k in self.SHIFT_RULES:
+            for k in self.SIGNALS:
                 if base[t].get(k) is not None and cur[t].get(k) is not None:
                     signals[f"{t}.{k}"] = {"before": base[t][k], "after": cur[t][k]}
         if key == "ppda":

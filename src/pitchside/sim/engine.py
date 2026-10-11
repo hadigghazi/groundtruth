@@ -329,10 +329,10 @@ class MatchEngine:
         tac = self.tactics[t]
         u0, v0 = self.slot_uv[idx, 0], self.slot_uv[idx, 1]
         if in_poss:
-            shift = 0.5 * (bu - 45.0) + 4.0 + 6.0 * tac.line_height
-            depth, width, pull = 1.15, 0.95 + 0.25 * tac.width, 0.25
+            shift = 0.5 * (bu - 45.0) + 4.0 + 14.0 * (tac.line_height - 0.5)
+            depth, width, pull = 1.15, 0.75 + 0.6 * tac.width, 0.25
         else:
-            shift = 0.45 * (bu - 50.0) - 4.0 + 10.0 * (tac.line_height - 0.5)
+            shift = 0.45 * (bu - 50.0) - 4.0 + 28.0 * (tac.line_height - 0.5)
             depth, width, pull = 0.72, 0.72, 0.40
         u = 22.0 + (u0 - 22.0) * depth + shift
         v = W / 2 + (v0 - W / 2) * width + pull * (bv - W / 2)
@@ -345,7 +345,7 @@ class MatchEngine:
             reach = min(0.35, 7.0 / max(ball_dist, 1e-6))
             gk_u, gk_v = max(bu * reach, 1.0), W / 2 + (bv - W / 2) * reach
         # Out of possession the back line holds near the box edge until the ball is close.
-        floor = 5.0 if in_poss else float(np.clip(bu - 8.0, 11.0, 20.0))
+        floor = 5.0 if in_poss else float(np.clip(bu - 8.0, 11.0, 20.0) + 8.0 * (tac.line_height - 0.5))
         u = np.where(gk, gk_u, np.clip(u, floor, 101.0))
         v = np.where(gk, gk_v, np.clip(v, 2.0, W - 2.0))
         if in_poss:
@@ -578,7 +578,7 @@ class MatchEngine:
                 self._emit("pressure", team_id=self.team_ids[o], player_id=self.pid[j], **self._xy(self.pos[j]))
         for j, dj in zip(opp, d_opp):
             if dj < 1.5 and now >= self.beaten_until[j]:
-                rate = 0.15 + 0.35 * self.tactics[o].press_intensity  # challenges per second at close range
+                rate = 0.05 + 0.6 * self.tactics[o].press_intensity  # challenges per second at close range
                 if self.rng.random() < rate * DT and self._tackle(int(j), c, now):
                     return
         if now >= self.next_decision_ms:
@@ -587,8 +587,8 @@ class MatchEngine:
     def _press(self, o: int, c: int, opp: np.ndarray, d_opp: np.ndarray, now: int, ov: _Overrides) -> None:
         tac = self.tactics[o]
         ball_u_def = pitch.to_team(self.pos[c], self.dir[o])[0]  # metres from the defenders' own goal line
-        reach = 40.0 + 60.0 * tac.press_intensity
-        k = 1 + int(tac.press_intensity > 0.4) + int(tac.press_intensity > 0.75)
+        reach = 30.0 + 75.0 * tac.press_intensity
+        k = 1 + int(tac.press_intensity > 0.35) + int(tac.press_intensity > 0.6) + int(tac.press_intensity > 0.85)
         n = 0
         for rank in np.argsort(d_opp):
             j = int(opp[rank])
@@ -702,7 +702,7 @@ class MatchEngine:
 
     def _decision_delay(self, c: int, pressured: bool) -> int:
         tempo = self.tactics[self.team[c]].tempo
-        s = self.rng.uniform(1.2, 3.4) * (1.25 - 0.5 * tempo) * (0.6 if pressured else 1.0)
+        s = self.rng.uniform(1.2, 3.4) * (1.6 - 1.2 * tempo) * (0.6 if pressured else 1.0)
         return int(s * 1000)
 
     def _decide(self, c: int, now: int, pressured: bool) -> None:
@@ -755,7 +755,7 @@ class MatchEngine:
         R = np.clip(self.pos[mates] + self.vel[mates] * 0.6, [1.0, 1.0], [L - 1.0, W - 1.0])
         seg = R - P
         dist = np.linalg.norm(seg, axis=1)
-        long_ok = tac.directness > 0.6 or rk == "goal_kick" or bool(self.is_gk[c])
+        long_ok = tac.directness > 0.5 or rk == "goal_kick" or bool(self.is_gk[c])
         max_d = {"throw_in": 25.0, "kickoff": 22.0}.get(rk, 62.0 if long_ok else 55.0)
         keep = (dist >= 4.0) & (dist <= max_d)
         uvR = pitch.to_team(R, d)
@@ -786,7 +786,8 @@ class MatchEngine:
             p = p * 0.45
         gain = _value(uvR) - _value(np.array([u_c, v_c]))
         loss = 0.05 + 0.3 * (1.0 - u_c / L) ** 2
-        util = p * (gain + 0.04) - (1.0 - p) * loss + tac.directness * 0.003 * fwd
+        util = (p * (gain + 0.04) - (1.0 - p) * loss + tac.directness * 0.006 * fwd
+                + (tac.directness - 0.5) * 0.04 * (dist > 30.0))
         return {"idx": mates, "R": R, "dist": dist, "high": high, "p": p, "util": util}
 
     def _pass(self, c: int, opts: dict, k: int, now: int, pressured: bool) -> None:

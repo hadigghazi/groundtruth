@@ -63,6 +63,8 @@ def main(argv: list[str] | None = None) -> None:
     dr.add_argument("--noise-seeds", type=int, nargs="*", default=list(range(200, 208)))
     dr.add_argument("--eval-seeds", type=int, nargs="*", default=list(range(300, 312)))
     dr.add_argument("--workers", type=int, default=4)
+    dr.add_argument("--write-thresholds", type=Path, default=None,
+                    help="set each signal's threshold to its 99th-percentile drift and write it here")
 
     sub.add_parser("league", help="print the fictional league")
     args = ap.parse_args(argv)
@@ -70,11 +72,16 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.cmd == "detector-report":
         from .evaluation.detector import effect_and_detection, noise_profile
-        out = {}
+        out, thresholds = {}, None
         if args.noise_seeds:
             out["noise"] = noise_profile(args.noise_seeds, workers=args.workers)
+            if args.write_thresholds:
+                thresholds = {s: v["p99_abs"] for s, v in out["noise"].items()}
+                args.write_thresholds.write_text(json.dumps({
+                    "thresholds": thresholds, "rule": "99th percentile of |drift| on unscripted matches",
+                    "noise_seeds": args.noise_seeds}, indent=2), encoding="utf-8")
         if args.eval_seeds:
-            out["detection"] = effect_and_detection(args.eval_seeds, workers=args.workers)
+            out["detection"] = effect_and_detection(args.eval_seeds, workers=args.workers, thresholds=thresholds)
         print(json.dumps(out, indent=2))
         return
 

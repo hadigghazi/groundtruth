@@ -3,7 +3,7 @@
 Three measurements, each over simulated matches:
 
 * noise: on matches with no hidden changes, how far each signal drifts on its
-  own between the last 5 minutes and the 15 before (this sets thresholds);
+  own between the last 8 minutes and the 20 before (this sets thresholds);
 * effect: on scripted matches, how far each signal moves after each kind of
   change (this shows which signals carry which cause);
 * detection: recall, false alarms and delay of the live detector, plus how
@@ -24,14 +24,14 @@ from ..stats.engine import BASELINE, MINUTE, RECENT, StatsEngine
 
 # Which own-team signals each hidden change should move, and which way.
 EXPECTED: dict[str, list[tuple[str, str]]] = {
-    "high_press": [("ppda", "down"), ("block_height_m", "up")],
-    "low_block": [("ppda", "up"), ("block_height_m", "down")],
-    "go_direct": [("long_pass_share", "up"), ("passes_per_min_in_possession", "up")],
-    "slow_down": [("passes_per_min_in_possession", "down"), ("long_pass_share", "down")],
+    "high_press": [("press_rate", "up"), ("block_height_m", "up")],
+    "low_block": [("press_rate", "down"), ("block_height_m", "down")],
+    "go_direct": [("long_pass_share", "up"), ("time_on_ball_s", "down")],
+    "slow_down": [("time_on_ball_s", "up"), ("long_pass_share", "down")],
     "push_wide": [("width_m", "up")],
 }
 RULE: dict[tuple[str, str], str] = {sig: label for label, sigs in EXPECTED.items() for sig in sigs}
-SIGNALS = sorted({s for sigs in EXPECTED.values() for s, _ in sigs})
+SIGNALS = list(StatsEngine.SIGNALS)
 MATCH_WINDOW = 12 * MINUTE  # a detection counts if it lands within 12 minutes of the change
 
 
@@ -40,11 +40,12 @@ def _fixtures(seeds: list[int]) -> list[tuple[str, str, int]]:
     return [(*next(pairs), s) for s in seeds]
 
 
-def _play(home: str, away: str, seed: int, scripted: bool, probe_after: int = 6 * MINUTE) -> dict:
+def _play(home: str, away: str, seed: int, scripted: bool, thresholds: dict | None = None,
+          probe_after: int = RECENT + MINUTE) -> dict:
     """Play one match live. Records every minute's signal deltas and each truth change's effect."""
     league = build_league()
     engine = MatchEngine(league[home], league[away], seed=seed, match_id=f"ev{seed}", scripted=scripted)
-    stats = StatsEngine(engine.meta())
+    stats = StatsEngine(engine.meta(), thresholds=thresholds)
     deltas: dict[str, list[float]] = defaultdict(list)
     changes: list[dict] = []
     seen = 0
@@ -77,9 +78,9 @@ def _play(home: str, away: str, seed: int, scripted: bool, probe_after: int = 6 
     return {"deltas": dict(deltas), "changes": changes, "shifts": shifts}
 
 
-def _run(fixtures, scripted, workers):
+def _run(fixtures, scripted, workers, thresholds=None):
     with ProcessPoolExecutor(max_workers=workers) as pool:
-        return list(pool.map(_play, *zip(*fixtures), itertools.repeat(scripted)))
+        return list(pool.map(_play, *zip(*fixtures), itertools.repeat(scripted), itertools.repeat(thresholds)))
 
 
 def noise_profile(seeds: list[int], workers: int = 4) -> dict:
@@ -93,8 +94,8 @@ def noise_profile(seeds: list[int], workers: int = 4) -> dict:
                 "p99_abs": round(float(np.percentile(np.abs(v), 99)), 3)} for s, v in sorted(pooled.items())}
 
 
-def effect_and_detection(seeds: list[int], workers: int = 4) -> dict:
-    runs = _run(_fixtures(seeds), True, workers)
+def effect_and_detection(seeds: list[int], workers: int = 4, thresholds: dict | None = None) -> dict:
+    runs = _run(_fixtures(seeds), True, workers, thresholds)
     effects: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
     found, rule_right, delays, total = 0, 0, [], 0
     shifts_total, shifts_matched = 0, 0
