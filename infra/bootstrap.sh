@@ -54,6 +54,7 @@ echo
 echo "  gh secret set AZURE_CLIENT_ID       -R $REPO -b $APP_ID"
 echo "  gh secret set AZURE_TENANT_ID       -R $REPO -b $TENANT"
 echo "  gh secret set AZURE_SUBSCRIPTION_ID -R $REPO -b $SUB"
+echo "  gh variable set AZURE_DEPLOY        -R $REPO -b true   # turns the deploy workflow on"
 echo
 echo "Models this subscription can deploy in $LOCATION (for picking the Tactician and writer models):"
 az cognitiveservices model list --location "$LOCATION" \

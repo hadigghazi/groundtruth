@@ -1,0 +1,77 @@
+name: deploy
+
+# Provision with Bicep, push the image to the registry, roll out the three apps, smoke-test.
+# Uses no runner minutes until the repository variable AZURE_DEPLOY is "true".
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: azure-deploy
+  cancel-in-progress: false
+
+jobs:
+  azure:
+    # Set the repository variable AZURE_DEPLOY to true once infra/bootstrap.sh has run.
+    if: vars.AZURE_DEPLOY == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      HAS_AZURE: ${{ secrets.AZURE_CLIENT_ID != '' }}
+      RG: groundtruth-rg
+    steps:
+      - uses: actions/checkout@v4
+      - run: az bicep install && az bicep build --file infra/main.bicep --stdout > /dev/null
+      - name: Not configured yet
+        if: env.HAS_AZURE != 'true'
+        run: echo "AZURE_CLIENT_ID is not set - run infra/bootstrap.sh in Azure Cloud Shell first. Skipping."
+      - uses: azure/login@v2
+        if: env.HAS_AZURE == 'true'
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Provision services (everything but the app)
+        if: env.HAS_AZURE == 'true'
+        run: |
+          AI_USER=$(az role definition list --name "Azure AI User" --query "[0].name" -o tsv || true)
+          echo "AI_USER=$AI_USER" >> "$GITHUB_ENV"
+          az deployment group create -g "$RG" -n "base-${{ github.run_number }}" -f infra/main.bicep \
+            -p aiUserRoleId="$AI_USER" ${{ vars.BICEP_PARAMS }} --query properties.outputs -o json > outputs.json
+          echo "REGISTRY=$(jq -r .registryName.value outputs.json)" >> "$GITHUB_ENV"
+          echo "SERVER=$(jq -r .registryServer.value outputs.json)" >> "$GITHUB_ENV"
+      - uses: docker/setup-buildx-action@v3
+        if: env.HAS_AZURE == 'true'
+      - name: Log in to the registry
+        if: env.HAS_AZURE == 'true'
+        run: az acr login --name "$REGISTRY"
+      - uses: docker/build-push-action@v6
+        if: env.HAS_AZURE == 'true'
+        with:
+          context: .
+          target: app
+          push: true
+          tags: ${{ env.SERVER }}/groundtruth:${{ github.sha }}
+          cache-from: type=gha,scope=app
+      - name: Roll out the app
+        if: env.HAS_AZURE == 'true'
+        run: |
+          az deployment group create -g "$RG" -n "app-${{ github.run_number }}" -f infra/main.bicep \
+            -p aiUserRoleId="$AI_USER" appImage="$SERVER/groundtruth:${{ github.sha }}" ${{ vars.BICEP_PARAMS }} -o none
+          FQDN=$(az containerapp show -g "$RG" -n groundtruth --query properties.configuration.ingress.fqdn -o tsv)
+          echo "URL=https://$FQDN" >> "$GITHUB_ENV"
+          echo "### Live at https://$FQDN" >> "$GITHUB_STEP_SUMMARY"
+      - name: Smoke test
+        if: env.HAS_AZURE == 'true'
+        run: |
+          for i in $(seq 1 40); do
+            curl -fsS "$URL/api/health" && curl -fsS -o /dev/null "$URL/" && { echo; echo "up at $URL"; exit 0; }
+            sleep 6
+          done
+          az containerapp logs show -g "$RG" -n groundtruth --tail 50 || true
+          exit 1

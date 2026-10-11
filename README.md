@@ -134,8 +134,10 @@ settings.
 
 ## Run it
 
-Everything runs in Docker; CI builds and tests every push, and screenshots every screen in English
-and Arabic, on desktop and phone, in headless Chromium.
+Everything runs in Docker. A push runs the Python tests (`ci.yml`) or the web build (`web.yml`),
+whichever changed; the heavier checks run on demand, for example
+`gh workflow run ci.yml -f ui=true` (screenshots of every screen, English and Arabic, desktop and
+phone) or `-f distributed=true` (the roles over the Azure emulators).
 
 ```bash
 docker build --target test -t groundtruth-test . && docker run --rm groundtruth-test
@@ -166,7 +168,8 @@ reaches Foundry, Speech, Event Hubs and the registry with a managed identity; th
 1. In Azure Cloud Shell (Bash), run `infra/bootstrap.sh`. It creates the resource group and an
    identity GitHub Actions signs in as through OpenID Connect, then prints three values.
 2. Set them as repository secrets (`AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`).
-3. Push to `main`. CI provisions, pushes the image, rolls out and smoke-tests; the job summary
+3. Set the repository variable `AZURE_DEPLOY` to `true` (the script prints the command). From then on
+   every push to `main` runs `deploy.yml`: it provisions, pushes the image, rolls out and smoke-tests; the job summary
    shows the URL.
 
 Command line: `groundtruth simulate`, `batch`, `calibrate`, `fit-models`, `detector-report`,
