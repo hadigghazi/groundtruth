@@ -38,6 +38,7 @@ class WorkerService:
         self._skip: set[str] = set()
         self._active: dict[str, set[str]] = defaultdict(set)  # partition -> matches in play
         self._ending: set[asyncio.Task] = set()
+        self._writing: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 
     async def run(self) -> None:
         await asyncio.gather(self.p.bus.consume("events", "workers", self._on_event),
@@ -114,11 +115,14 @@ class WorkerService:
     # ------------------------------------------------------------------ output
 
     async def _flush(self, s: MatchSession) -> None:
-        msgs, docs = s.drain()
-        if msgs:
-            await self.p.broadcaster.send(s.match_id, msgs)
-        if docs:
-            await self.p.store.upsert(docs)
+        # one flush at a time per match: the final one must not overtake a write still in flight,
+        # or the simulator could grade the match before the last verified insights are stored
+        async with self._writing[s.match_id]:
+            msgs, docs = s.drain()
+            if msgs:
+                await self.p.broadcaster.send(s.match_id, msgs)
+            if docs:
+                await self.p.store.upsert(docs)
 
     async def _flusher(self) -> None:
         while True:

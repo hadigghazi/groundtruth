@@ -124,3 +124,32 @@ def test_the_full_time_recap_package(played, session):
 def test_storylines_carry_their_numbers(session):
     for story in session.storylines.all:
         assert story["facts"] and set(story["headline"]) == {"en", "es", "ar"}
+
+
+def test_the_final_flush_waits_for_a_write_in_flight(played):
+    """On a real store a write takes time; full time must not be signalled before the last one lands."""
+    from groundtruth.cloud import ROLES, Platform
+    from groundtruth.cloud.broadcast import LocalBroadcaster
+    from groundtruth.cloud.bus import MemoryBus
+    from groundtruth.cloud.store import MemoryStore
+    from groundtruth.live.session import MatchSession
+    from groundtruth.live.worker import WorkerService
+
+    class SlowStore(MemoryStore):
+        async def upsert(self, docs):
+            await asyncio.sleep(0.2)
+            await super().upsert(docs)
+
+    async def go():
+        p = Platform(MemoryBus(), SlowStore(), LocalBroadcaster(), ROLES)
+        w = WorkerService(p, agents=False)
+        s = MatchSession(played.session.meta)
+        s.doc("result", "result-x", {"moment_id": "x"})
+        periodic = asyncio.create_task(w._flush(s))  # the periodic flusher takes the document
+        await asyncio.sleep(0.01)
+        await w._flush(s)  # the end-of-match flush
+        stored = await p.store.get(s.match_id, "result-x")
+        await periodic
+        return stored
+
+    assert asyncio.run(go()) is not None
