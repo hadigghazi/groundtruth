@@ -87,3 +87,14 @@ def test_passes_and_shots_can_be_rebuilt_from_positions_alone(played):
     print(result)
     assert result["pass"]["recall"] > 0.5 and result["pass"]["precision"] > 0.5, result
     assert result["shot"]["detected"] > 0, result
+
+
+def test_control_chaos_survives_a_ball_over_the_line(played):
+    """A restart can leave the ball just behind a goal line; the zone count must not break."""
+    import numpy as np
+    from groundtruth.stats.engine import StatsEngine
+
+    stats = StatsEngine(played["engine"].meta())
+    f = played["frames"][100]
+    stats.feed_frame(type(f)(f.period, f.clock_ms, np.array([-0.4, -0.2, 0.0]), f.ids, f.xy))
+    assert all(0 <= z < 24 for _, z in stats.w["zone"].items)

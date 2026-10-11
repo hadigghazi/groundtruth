@@ -225,7 +225,7 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -e .
-      - run: groundtruth fit-models --train 16 --test 4 --workers 4 --write coefficients.json | tee fit-report.json
+      - run: set -o pipefail; groundtruth fit-models --train 16 --test 4 --workers 4 --write coefficients.json | tee fit-report.json
       - uses: actions/upload-artifact@v4
         with:
           name: models
@@ -244,7 +244,7 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -e .
-      - run: groundtruth learn-detector --workers 4 --write learned.json | tee learned-report.json
+      - run: set -o pipefail; groundtruth learn-detector --workers 4 --write learned.json | tee learned-report.json
       - uses: actions/upload-artifact@v4
         with:
           name: learned
@@ -263,7 +263,7 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -e .
-      - run: groundtruth detector-report --workers 4 --write detector.json | tee detector-report.json
+      - run: set -o pipefail; groundtruth detector-report --workers 4 --write detector.json | tee detector-report.json
       - uses: actions/upload-artifact@v4
         with:
           name: detector

@@ -291,7 +291,8 @@ class StatsEngine:
                            "width": float(np.percentile(uv[:, 1], 90) - np.percentile(uv[:, 1], 10))}
         self.w["shape"].add(self.t, (self.poss_team, sample))
         bx, by = float(f.ball[0]), float(f.ball[1])
-        self.w["zone"].add(self.t, int(min(bx // 17.5, 5)) * 4 + int(min(by // 17.0, 3)))
+        # the ball can sit just over a line at a restart: clamp both ways, not only at the far end
+        self.w["zone"].add(self.t, int(min(max(bx // 17.5, 0), 5)) * 4 + int(min(max(by // 17.0, 0), 3)))
 
     # ----------------------------------------------------------------- events
 
