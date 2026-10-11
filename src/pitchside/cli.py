@@ -10,7 +10,7 @@ from pathlib import Path
 
 from .league import build_league
 from .sim.io import simulate, write_match
-from .sim.summary import check, player_running, team_totals
+from .sim.summary import check, diagnostics, player_running, team_totals
 
 
 def report(engine, events, frames) -> dict:
@@ -27,6 +27,7 @@ def report(engine, events, frames) -> dict:
         "outfield_km_range": [round(min(kms, default=0), 2), round(max(kms, default=0), 2)],
         "top_speed_kmh_max": round(max((r["top_kmh"] for r in full.values()), default=0), 1),
         "truth": [f"{t.period}H {t.clock_ms // 60000}' {t.team_id} {t.label}" for t in engine.truth],
+        "diagnostics": diagnostics(events, engine.meta().direction),
         "out_of_range": check(totals),
     }
 
@@ -81,6 +82,7 @@ def main(argv: list[str] | None = None) -> None:
                   f"km {r['outfield_km_mean']} {r['outfield_km_range']}  top {r['top_speed_kmh_max']} km/h")
             for tid, s in r["totals"].items():
                 print("   ", tid, "  ".join(f"{k}={s.get(k, 0):.3g}" for k in keys))
+                print("       ", "  ".join(f"{k}={v}" for k, v in r["diagnostics"][tid].items()))
             print("    truth:", "; ".join(r["truth"]) or "none")
             print("    out of range:", "; ".join(r["out_of_range"]) or "none")
         return

@@ -322,12 +322,12 @@ class MatchEngine:
             depth, width, pull = 1.15, 0.95 + 0.25 * tac.width, 0.25
         else:
             shift = 0.45 * (bu - 50.0) - 4.0 + 10.0 * (tac.line_height - 0.5)
-            depth, width, pull = 0.85, 0.72, 0.40
+            depth, width, pull = 0.72, 0.72, 0.40
         u = 22.0 + (u0 - 22.0) * depth + shift
         v = W / 2 + (v0 - W / 2) * width + pull * (bv - W / 2)
         gk = self.is_gk[idx]
         # Out of possession the back line holds near the box edge until the ball is close.
-        floor = 5.0 if in_poss else float(np.clip(bu - 8.0, 6.0, 14.0))
+        floor = 5.0 if in_poss else float(np.clip(bu - 8.0, 11.0, 20.0))
         u = np.where(gk, np.clip(3.0 + 0.06 * bu, 2.0, 14.0), np.clip(u, floor, 101.0))
         v = np.where(gk, W / 2 + 0.2 * (bv - W / 2), np.clip(v, 2.0, W - 2.0))
         if in_poss:
@@ -539,7 +539,7 @@ class MatchEngine:
                 self._emit("pressure", team_id=self.team_ids[o], player_id=self.pid[j], **self._xy(self.pos[j]))
         for j, dj in zip(opp, d_opp):
             if dj < 1.8 and now >= self.beaten_until[j]:
-                rate = 0.8 + 2.0 * self.tactics[o].press_intensity  # challenges per second at close range
+                rate = 0.5 + 1.2 * self.tactics[o].press_intensity  # challenges per second at close range
                 if self.rng.random() < rate * DT and self._tackle(int(j), c, now):
                     return
         if now >= self.next_decision_ms:
@@ -614,10 +614,10 @@ class MatchEngine:
         """A tackle attempt by j on the carrier c. True when play changes hands or stops."""
         o = int(self.team[j])
         loc = self.pos[c].copy()
-        if self.rng.random() < 0.22 + 0.12 * self.tactics[o].press_intensity:
+        if self.rng.random() < 0.16 + 0.10 * self.tactics[o].press_intensity:
             self._foul(j, c, now, loc)
             return True
-        p_win = float(np.clip(0.5 + 0.35 * (self.tackling[j] - self.dribbling[c]), 0.2, 0.8))
+        p_win = float(np.clip(0.45 + 0.35 * (self.tackling[j] - self.dribbling[c]), 0.2, 0.75))
         won = self.rng.random() < p_win
         self._emit("tackle", team_id=self.team_ids[o], player_id=self.pid[j],
                    outcome="won" if won else "lost", **self._xy(loc))
@@ -677,7 +677,7 @@ class MatchEngine:
                     p_shoot = 0.6
                 else:
                     blockers = len(self._defenders_in_cone(c))
-                    p_shoot = float(np.clip(1.5 * q - 0.02, 0.0, 0.55)) * (0.5 if blockers >= 2 else 1.0)
+                    p_shoot = float(np.clip(0.9 * q - 0.02, 0.0, 0.45)) * (0.5 if blockers >= 2 else 1.0)
                 if self.rng.random() < p_shoot:
                     self._shoot(c, now, pressured, q=q, header=header)
                     return
@@ -731,8 +731,8 @@ class MatchEngine:
         fwd = uvR[:, 0] - u_c
         high = (dist > 32.0) | ((lane < 2.0) & (dist > 18.0)) | (rk == "corner")
         skill = self.passing[c] - 0.5
-        lg = 2.7 - 0.055 * dist + 0.18 * lane + 0.12 * recv - 0.8 * pressured + 1.2 * skill - 0.01 * np.maximum(fwd, 0)
-        lh = 1.5 - 0.045 * dist + 0.20 * recv - 0.6 * pressured + 1.0 * skill
+        lg = 2.4 - 0.055 * dist + 0.18 * lane + 0.12 * recv - 0.8 * pressured + 1.2 * skill - 0.01 * np.maximum(fwd, 0)
+        lh = 1.3 - 0.045 * dist + 0.20 * recv - 0.6 * pressured + 1.0 * skill
         p = _sigmoid(np.where(high, lh, lg))
         if rk == "corner":
             p = p * 0.45
@@ -869,7 +869,7 @@ class MatchEngine:
             elif f.outcome == "incomplete":
                 # A clean cut-out is an interception; a loose ball picked up later is a recovery.
                 gap = float(np.linalg.norm(self.pos[f.winner] - f.end))
-                kind = "interception" if gap < 2.5 else "recovery"
+                kind = "interception" if gap < 1.5 else "recovery"
                 self._emit(kind, team_id=self.team_ids[self.team[f.winner]],
                            player_id=self.pid[f.winner], **self._xy(f.end), related=[ev.event_id])
                 self._give_ball(f.winner, now, kind)

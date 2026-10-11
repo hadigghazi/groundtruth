@@ -86,6 +86,44 @@ def player_running(frames: list[Frame]) -> dict[str, dict[str, float]]:
     return {pid: {"km": dist[pid] / 1000.0, "top_kmh": top[pid], "minutes": ticks[pid] / 600.0} for pid in dist}
 
 
+def diagnostics(events: list[Event], direction: dict[str, dict[str, int]]) -> dict[str, dict[str, float]]:
+    """How attacks progress: possessions, how many reach the final third and the box, shot range."""
+    from .. import pitch
+
+    poss: dict[int, dict] = {}
+    shots: dict[str, list[float]] = defaultdict(list)
+    for e in events:
+        if e.possession_id is None or e.team_id is None or e.type not in ("pass", "carry", "shot"):
+            continue
+        p = poss.setdefault(e.possession_id, {"team": e.team_id, "passes": 0, "third": False, "box": False})
+        if p["team"] != e.team_id:
+            continue
+        d = direction[str(e.period)][e.team_id]
+        if e.end_x is not None:
+            u, v = pitch.to_team(np.array([e.end_x, e.end_y]), d)
+            p["third"] |= u > 70.0
+            p["box"] |= pitch.in_box(u, v)
+        if e.type == "pass":
+            p["passes"] += 1
+        if e.type == "shot":
+            u, v = pitch.to_team(np.array([e.x, e.y]), d)
+            shots[e.team_id].append(float(np.hypot(pitch.LENGTH - u, pitch.WIDTH / 2 - v)))
+    out = {}
+    for tid in direction["1"]:
+        ps = [p for p in poss.values() if p["team"] == tid]
+        n = max(len(ps), 1)
+        sd = shots.get(tid, [])
+        out[tid] = {
+            "possessions": len(ps),
+            "passes_per_possession": round(sum(p["passes"] for p in ps) / n, 2),
+            "reach_final_third": round(sum(p["third"] for p in ps) / n, 3),
+            "reach_box": round(sum(p["box"] for p in ps) / n, 3),
+            "mean_shot_distance_m": round(float(np.mean(sd)), 1) if sd else 0.0,
+            "shots_inside_18m": round(float(np.mean(np.array(sd) < 18.0)), 2) if sd else 0.0,
+        }
+    return out
+
+
 def check(totals: dict[str, dict[str, float]]) -> list[str]:
     """Notes on totals that fall outside the typical ranges."""
     notes = []
