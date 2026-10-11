@@ -1,13 +1,15 @@
-"""Score the tactical-shift detector against the engine's truth log.
+"""Choose and score the tactical-shift detector against the engine's truth log.
 
-Three measurements, each over simulated matches:
+Three disjoint sets of simulated matches:
 
-* noise: on matches with no hidden changes, how far each signal drifts on its
-  own between the last 8 minutes and the 20 before (this sets thresholds);
-* effect: on scripted matches, how far each signal moves after each kind of
-  change (this shows which signals carry which cause);
-* detection: recall, false alarms and delay of the live detector, plus how
-  often a plain rule (signal -> cause) names the right cause.
+* noise (no hidden changes): how far each candidate signal drifts on its own
+  between the last 8 minutes and the 20 before;
+* selection (scripted): how far each signal moves after each kind of change.
+  For every change, the signals with the best effect-to-noise ratio are kept,
+  and each kept signal gets a threshold from the noise;
+* test (scripted, never used for choices): recall, false alarms and delay of
+  the live detector, and how often the plain rule (signal moved this way ->
+  this cause) names the true cause.
 """
 
 from __future__ import annotations
@@ -20,19 +22,14 @@ import numpy as np
 
 from ..league import build_league
 from ..sim.engine import MatchEngine
+from ..sim.tactics import LABELS
 from ..stats.engine import BASELINE, MINUTE, RECENT, StatsEngine
 
-# Which own-team signals each hidden change should move, and which way.
-EXPECTED: dict[str, list[tuple[str, str]]] = {
-    "high_press": [("press_rate", "up"), ("block_height_m", "up")],
-    "low_block": [("press_rate", "down"), ("block_height_m", "down")],
-    "go_direct": [("long_pass_share", "up"), ("time_on_ball_s", "down")],
-    "slow_down": [("time_on_ball_s", "up"), ("long_pass_share", "down")],
-    "push_wide": [("width_m", "up")],
-}
-RULE: dict[tuple[str, str], str] = {sig: label for label, sigs in EXPECTED.items() for sig in sigs}
 SIGNALS = list(StatsEngine.SIGNALS)
 MATCH_WINDOW = 12 * MINUTE  # a detection counts if it lands within 12 minutes of the change
+MIN_SNR = 0.8               # a signal must move by at least 0.8 noise standard deviations to be kept
+KEEP_PER_CAUSE = 2
+THRESHOLD_PCT = 97          # threshold = this percentile of |drift| on unscripted matches
 
 
 def _fixtures(seeds: list[int]) -> list[tuple[str, str, int]]:
@@ -40,16 +37,16 @@ def _fixtures(seeds: list[int]) -> list[tuple[str, str, int]]:
     return [(*next(pairs), s) for s in seeds]
 
 
-def _play(home: str, away: str, seed: int, scripted: bool, thresholds: dict | None = None,
-          probe_after: int = RECENT + MINUTE) -> dict:
-    """Play one match live. Records every minute's signal deltas and each truth change's effect."""
+def _play(home: str, away: str, seed: int, scripted: bool, thresholds: dict | None = None) -> dict:
+    """Play one match live; record per-minute drifts and each truth change's effect."""
     league = build_league()
     engine = MatchEngine(league[home], league[away], seed=seed, match_id=f"ev{seed}", scripted=scripted)
     stats = StatsEngine(engine.meta(), thresholds=thresholds)
-    deltas: dict[str, list[float]] = defaultdict(list)
+    drifts: dict[str, list[float]] = defaultdict(list)
     changes: list[dict] = []
     seen = 0
     next_min = RECENT + BASELINE
+    probe = RECENT + MINUTE  # read the effect once the recent window lies wholly after the change
     for events, frame in engine.run():
         stats.feed_frame(frame)
         for ev in events:
@@ -61,7 +58,7 @@ def _play(home: str, away: str, seed: int, scripted: bool, thresholds: dict | No
             changes.append({"label": rec.label, "team": rec.team_id, "t": t,
                             "base": stats.window_metrics(t - BASELINE, t), "after": None})
         for ch in changes:
-            if ch["after"] is None and t >= ch["t"] + probe_after:
+            if ch["after"] is None and t >= ch["t"] + probe:
                 ch["after"] = stats.window_metrics(t - RECENT, t)
         if not scripted and t >= next_min:
             next_min += MINUTE
@@ -69,13 +66,12 @@ def _play(home: str, away: str, seed: int, scripted: bool, thresholds: dict | No
             base = stats.window_metrics(t - RECENT - BASELINE, t - RECENT)
             for tid in stats.team_ids:
                 for s in SIGNALS:
-                    a, b = base[tid][s], cur[tid][s]
+                    a, b = base[tid].get(s), cur[tid].get(s)
                     if a is not None and b is not None:
-                        deltas[s].append(b - a)
-    shifts = [{"t": m.t, "team": m.team_id, "signal": m.metrics["signal"], "direction": m.metrics["direction"],
-               "before": m.metrics["before"], "after": m.metrics["after"]}
+                        drifts[s].append(b - a)
+    shifts = [{"t": m.t, "team": m.team_id, "signal": m.metrics["signal"], "direction": m.metrics["direction"]}
               for m in stats.moments if m.kind == "tactical_shift"]
-    return {"deltas": dict(deltas), "changes": changes, "shifts": shifts}
+    return {"drifts": dict(drifts), "changes": changes, "shifts": shifts}
 
 
 def _run(fixtures, scripted, workers, thresholds=None):
@@ -84,52 +80,91 @@ def _run(fixtures, scripted, workers, thresholds=None):
 
 
 def noise_profile(seeds: list[int], workers: int = 4) -> dict:
-    runs = _run(_fixtures(seeds), False, workers)
     pooled: dict[str, list[float]] = defaultdict(list)
-    for r in runs:
-        for s, ds in r["deltas"].items():
+    for r in _run(_fixtures(seeds), False, workers):
+        for s, ds in r["drifts"].items():
             pooled[s].extend(ds)
-    return {s: {"n": len(v), "p90_abs": round(float(np.percentile(np.abs(v), 90)), 3),
-                "p95_abs": round(float(np.percentile(np.abs(v), 95)), 3),
-                "p99_abs": round(float(np.percentile(np.abs(v), 99)), 3)} for s, v in sorted(pooled.items())}
+    out = {}
+    for s, v in sorted(pooled.items()):
+        a = np.abs(np.array(v))
+        out[s] = {"n": len(v), "sd": round(float(np.std(v)), 4),
+                  **{f"p{p}_abs": round(float(np.percentile(a, p)), 4) for p in (90, 95, 97, 99)}}
+    return out
 
 
-def effect_and_detection(seeds: list[int], workers: int = 4, thresholds: dict | None = None) -> dict:
-    runs = _run(_fixtures(seeds), True, workers, thresholds)
-    effects: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
-    found, rule_right, delays, total = 0, 0, [], 0
+def effect_profile(seeds: list[int], workers: int = 4) -> dict:
+    """Mean change of every signal for the changing team, by kind of change."""
+    eff: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+    for r in _run(_fixtures(seeds), True, workers):
+        for ch in r["changes"]:
+            if ch["after"] is None:
+                continue
+            for s in SIGNALS:
+                a, b = ch["base"][ch["team"]].get(s), ch["after"][ch["team"]].get(s)
+                if a is not None and b is not None:
+                    eff[ch["label"]][s].append(b - a)
+    return {lab: {s: {"mean": round(float(np.mean(v)), 4), "n": len(v)} for s, v in sorted(sig.items())}
+            for lab, sig in sorted(eff.items())}
+
+
+def choose(noise: dict, effects: dict) -> dict:
+    """Keep, for each cause, the signals that move most relative to their noise."""
+    expected: dict[str, list[tuple[str, str, float]]] = {}
+    for label in LABELS:
+        ranked = []
+        for s, e in effects.get(label, {}).items():
+            sd = noise.get(s, {}).get("sd")
+            if sd:
+                snr = e["mean"] / sd
+                if abs(snr) >= MIN_SNR:
+                    ranked.append((s, "up" if snr > 0 else "down", round(abs(snr), 2)))
+        ranked.sort(key=lambda r: -r[2])
+        expected[label] = ranked[:KEEP_PER_CAUSE]
+    cause_map: dict[str, tuple[str, float]] = {}
+    for label, sigs in expected.items():
+        for s, d, snr in sigs:
+            key = f"{s}|{d}"
+            if key not in cause_map or snr > cause_map[key][1]:
+                cause_map[key] = (label, snr)
+    used = sorted({s for sigs in expected.values() for s, _, _ in sigs})
+    thresholds = {s: noise[s][f"p{THRESHOLD_PCT}_abs"] for s in used}
+    return {"thresholds": thresholds, "cause_map": {k: v[0] for k, v in sorted(cause_map.items())},
+            "expected": {lab: [[s, d, snr] for s, d, snr in sigs] for lab, sigs in expected.items()}}
+
+
+def detection(seeds: list[int], config: dict, workers: int = 4) -> dict:
+    expected = {lab: {(s, d) for s, d, _ in sigs} for lab, sigs in config["expected"].items()}
+    runs = _run(_fixtures(seeds), True, workers, config["thresholds"])
+    found, right, delays, total = 0, 0, [], 0
     shifts_total, shifts_matched = 0, 0
     per_change = []
     for r in runs:
         for ch in r["changes"]:
             total += 1
-            if ch["after"] is not None:
-                for s in SIGNALS:
-                    a, b = ch["base"][ch["team"]][s], ch["after"][ch["team"]][s]
-                    if a is not None and b is not None:
-                        effects[ch["label"]][s].append(b - a)
-            hits = [sh for sh in r["shifts"] if sh["team"] == ch["team"] and 0 <= sh["t"] - ch["t"] <= MATCH_WINDOW
-                    and (sh["signal"], sh["direction"]) in EXPECTED[ch["label"]]]
-            first = min(hits, key=lambda sh: sh["t"]) if hits else None
-            if first:
+            near = [sh for sh in r["shifts"] if sh["team"] == ch["team"] and 0 <= sh["t"] - ch["t"] <= MATCH_WINDOW]
+            hits = [sh for sh in near if (sh["signal"], sh["direction"]) in expected.get(ch["label"], set())]
+            first = min(near, key=lambda sh: sh["t"]) if near else None
+            if hits:
                 found += 1
-                delays.append((first["t"] - ch["t"]) / MINUTE)
-                rule_right += RULE[(first["signal"], first["direction"])] == ch["label"]
+                delays.append((min(sh["t"] for sh in hits) - ch["t"]) / MINUTE)
+            if first:
+                right += config["cause_map"].get(f"{first['signal']}|{first['direction']}") == ch["label"]
             per_change.append({"label": ch["label"], "team": ch["team"], "minute": round(ch["t"] / MINUTE, 1),
-                               "detected": bool(first),
-                               "delay_min": round((first["t"] - ch["t"]) / MINUTE, 1) if first else None})
+                               "detected": bool(hits),
+                               "first_signal": first and f"{first['signal']} {first['direction']}"})
         for sh in r["shifts"]:
             shifts_total += 1
             shifts_matched += any(sh["team"] == ch["team"] and 0 <= sh["t"] - ch["t"] <= MATCH_WINDOW
                                   for ch in r["changes"])
+    n_matches = len(runs)
     return {
+        "matches": n_matches,
         "changes": total,
         "recall": round(found / total, 3) if total else None,
         "median_delay_min": round(float(np.median(delays)), 1) if delays else None,
-        "rule_cause_accuracy": round(rule_right / found, 3) if found else None,
+        "rule_cause_accuracy_on_first_alert": round(right / total, 3) if total else None,
         "shift_moments": shifts_total,
+        "false_alarms_per_match": round((shifts_total - shifts_matched) / n_matches, 2),
         "shift_precision": round(shifts_matched / shifts_total, 3) if shifts_total else None,
-        "mean_effect": {lab: {s: round(float(np.mean(v)), 3) for s, v in sorted(sig.items())}
-                        for lab, sig in sorted(effects.items())},
         "per_change": per_change,
     }

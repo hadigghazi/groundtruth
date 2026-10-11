@@ -74,7 +74,7 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -e .
-      - run: pitchside detector-report --workers 4 --write-thresholds detector.json | tee detector-report.json
+      - run: pitchside detector-report --workers 4 --write detector.json | tee detector-report.json
       - uses: actions/upload-artifact@v4
         with:
           name: detector
