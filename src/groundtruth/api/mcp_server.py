@@ -20,7 +20,15 @@ def mount_mcp(app, sessions: dict):
     from ..agents.desk import brief, desk_functions
     from ..agents.pipeline import AS_OF
 
-    mcp = FastMCP("GroundTruth", stateless_http=True, json_response=True)
+    # DNS-rebinding protection guards servers on a user's own machine; this one is a public,
+    # read-only server reached under whatever host name it is deployed at, so it is off.
+    try:
+        from mcp.server.transport_security import TransportSecuritySettings
+
+        security = {"transport_security": TransportSecuritySettings(enable_dns_rebinding_protection=False)}
+    except ImportError:  # older SDKs have no such check
+        security = {}
+    mcp = FastMCP("GroundTruth", stateless_http=True, json_response=True, **security)
     mcp.settings.streamable_http_path = "/"
 
     def session(match_id: str):

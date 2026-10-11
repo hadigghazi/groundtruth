@@ -75,3 +75,15 @@ def test_series_are_recorded_every_minute(played):
         pts = stats.series["threat"][tid]
         assert len(pts) >= 85
         assert np.all(np.diff([t for t, _ in pts]) == 60_000)
+
+
+def test_passes_and_shots_can_be_rebuilt_from_positions_alone(played):
+    from groundtruth.stats.autoevent import detect, score
+
+    meta = played["engine"].meta()
+    team_of = {p.player_id: t.team_id for t in (meta.home, meta.away) for p in t.lineup + t.bench}
+    keepers = {p.player_id for t in (meta.home, meta.away) for p in t.lineup + t.bench if p.role == "GK"}
+    result = score(detect(played["frames"], team_of, keepers), played["events"])
+    print(result)
+    assert result["pass"]["recall"] > 0.5 and result["pass"]["precision"] > 0.5, result
+    assert result["shot"]["detected"] > 0, result

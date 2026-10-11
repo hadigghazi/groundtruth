@@ -73,6 +73,9 @@ def main(argv: list[str] | None = None) -> None:
     ea.add_argument("--concurrency", type=int, default=4)
     ea.add_argument("--write", type=Path, default=None)
 
+    ae = sub.add_parser("autoevent", help="rebuild passes and shots from positions alone, scored against the event log")
+    ae.add_argument("--seeds", type=int, nargs="+", default=[7, 8, 9, 10])
+
     sub.add_parser("schema", help="print the overlay cue's JSON Schema")
     sub.add_parser("league", help="print the fictional league")
     args = ap.parse_args(argv)
@@ -85,6 +88,18 @@ def main(argv: list[str] | None = None) -> None:
         if args.write:
             args.write.write_text(text, encoding="utf-8")
         print(text)
+        return
+
+    if args.cmd == "autoevent":
+        from .stats.autoevent import run
+        clubs = list(league.values())
+        per = [run(clubs[i % len(clubs)], clubs[(i + 1) % len(clubs)], s) for i, s in enumerate(args.seeds)]
+        total = {}
+        for kind in ("pass", "shot"):
+            ev, det, hit = (sum(p[kind][k] for p in per) for k in ("events", "detected", "matched"))
+            prec, rec = (hit / det if det else 0.0), (hit / ev if ev else 0.0)
+            total[kind] = {"events": ev, "detected": det, "matched": hit, "precision": round(prec, 3), "recall": round(rec, 3)}
+        print(json.dumps({"seeds": args.seeds, "total": total, "per_match": per}, indent=2))
         return
 
     if args.cmd == "schema":
