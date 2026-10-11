@@ -295,7 +295,8 @@ export function BroadcastView({ meta, getFrame, tags, focusPlayer, compact = fal
         const bp = toScene(f.ball[0], f.ball[1]);
         ball.position.set(bp.x, 0.24 + f.ball[2], bp.z);
         ballShadow.position.set(bp.x, 0.02, bp.z);
-        const target = new THREE.Vector3(THREE.MathUtils.clamp(bp.x, -L / 2 + 20, L / 2 - 20), 0, bp.z * 0.45);
+        // aim a little short of the ball's line, so the pitch, not the stand, fills the frame
+        const target = new THREE.Vector3(THREE.MathUtils.clamp(bp.x, -L / 2 + 20, L / 2 - 20), 0, bp.z * 0.45 + 5);
         look.lerp(target, 0.05);
         camera.position.set(look.x * 0.9, 19, W / 2 + 32);
         camera.lookAt(look);
