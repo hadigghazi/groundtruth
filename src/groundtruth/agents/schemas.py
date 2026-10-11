@@ -36,6 +36,12 @@ class Insight(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
 
 
+class Alternative(BaseModel):
+    team_id: str = Field(description="The team the alternative says changed")
+    cause: Cause = Field(description="The alternative cause, from the fixed vocabulary")
+    argument: str = Field(description="One sentence naming the signals that support it")
+
+
 class Judgement(BaseModel):
     supported: bool = Field(description="True only if every causal claim follows from the evidence")
     problems: list[str] = Field(default_factory=list)

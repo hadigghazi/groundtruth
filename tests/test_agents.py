@@ -9,8 +9,8 @@ import pytest
 from groundtruth.agents.evidence import evidence_pack, is_allowed, numbers_with_places
 from groundtruth.agents.fake import ScriptedChatClient
 from groundtruth.agents.hook import InsightBoard
-from groundtruth.agents.pipeline import AgentTeam
-from groundtruth.agents.schemas import Claim, Insight, Rewrite
+from groundtruth.agents.pipeline import AgentTeam, arbitrate
+from groundtruth.agents.schemas import Alternative, Claim, Insight, Rewrite
 from groundtruth.agents.verify import check_insight, check_rewrite, rulebook
 from groundtruth.schema import Moment
 from groundtruth.stats.engine import BASELINE, RECENT
@@ -151,3 +151,19 @@ def test_rewrites_must_name_the_team(shift):
     assert check_rewrite(good, "en", [], 2, names) == []
     assert any("does not name the team" in p for p in check_rewrite(bad, "en", [], 2, names))
     assert check_insight(_insight(m, explanation="Their best spell of the season."), pack, causes)
+
+
+def test_the_challenger_wins_only_when_the_signals_clearly_back_it(played):
+    stats = played["stats"]
+    m = Moment(moment_id="t001-c1", match_id="t001", kind="tactical_shift", period=2, clock_ms=80 * 60_000,
+               t=stats.t, team_id=stats.team_ids[0], salience=0.5, headline="")
+    pack = evidence_pack(stats, m)
+    base = {t: pack["teams"][t]["previous_20_min"] for t in pack["teams"]}
+    cur = {t: pack["teams"][t]["last_10_min"] for t in pack["teams"]}
+    scored = sorted((r[0], tid, cause) for tid in stats.team_ids for cause in stats.causes
+                    if (r := stats._score(cause, tid, base, cur)))
+    (lo, lo_t, lo_c), (hi, hi_t, hi_c) = scored[0], scored[-1]
+    ins = Insight(team_id=lo_t, cause=lo_c, headline="x", explanation="x", why_it_matters="x", confidence=0.5)
+    _, _, wins = arbitrate(stats, pack, ins, Alternative(team_id=hi_t, cause=hi_c, argument="x"))
+    assert wins == (round(hi, 2) - round(lo, 2) >= 1.0)
+    assert arbitrate(stats, pack, ins, Alternative(team_id=lo_t, cause=lo_c, argument="x"))[2] is False

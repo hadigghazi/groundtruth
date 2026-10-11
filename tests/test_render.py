@@ -87,3 +87,15 @@ def test_a_new_caption_cuts_the_last_one_short():
                           profile="all", lang="en", headline=str(i))
     first, second = producer.place(mk(1, 0)), producer.place(mk(2, 2000))
     assert second.t_in == 2000 and first.t_out == 2000
+
+
+def test_the_producer_holds_back_a_minor_card_it_just_aired():
+    from groundtruth.schema import CueTime
+    producer = Producer()
+    mk = lambda i, t, priority=4: Cue(cue_id=f"r{i}", match_id="m", t_in=t, t_out=t + 6000, start=CueTime(period=1, clock_ms=t),
+                                      end=CueTime(period=1, clock_ms=t + 6000), layer="ticker", template="passing_move",
+                                      priority=priority, profile="all", lang="en", team_id="RVM", headline=str(i))
+    assert producer.place(mk(1, 0)) is not None
+    assert producer.place(mk(2, 60_000)) is None and producer.repeats  # the same card a minute later
+    assert producer.place(mk(3, 5 * 60_000)) is not None  # five minutes on, it is news again
+    assert producer.place(mk(4, 5 * 60_000 + 30_000, priority=1)) is not None  # important cards always air

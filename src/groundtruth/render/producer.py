@@ -7,6 +7,11 @@ would wait longer than `max_wait_ms` (a stale overlay is worse than none).
 
 A verified card that upgrades a template takes the template's slot, so it
 never queues: viewers of its profile see it instead of the template.
+
+The producer also remembers what it aired: a minor card (priority 3 or lower)
+that repeats one shown in the last few minutes, same template about the same
+team or player, is held back. Viewers notice repetition long before they
+notice a missing card.
 """
 
 from __future__ import annotations
@@ -18,6 +23,8 @@ from ..schema import Cue
 CAPACITY = {"fullscreen": 1, "lower_third": 1, "stat_panel": 1, "ticker": 1, "player_tag": 2, "pitch_overlay": 1,
             "caption": 1}
 REPLACE_LAYERS = {"caption"}  # the newest line always wins: a running caption never queues
+REPEAT_MS = 4 * 60_000
+NO_MEMORY = {"caption", "fullscreen"}
 
 
 class Producer:
@@ -25,9 +32,18 @@ class Producer:
         self.max_wait_ms = max_wait_ms
         self.schedule: dict[tuple[str, str], list[Cue]] = defaultdict(list)
         self.dropped: list[Cue] = []
+        self.repeats: list[Cue] = []
+        self._aired: dict[tuple, int] = {}
 
     def place(self, cue: Cue) -> Cue | None:
         """Schedule a cue; returns it (possibly moved later) or None if it was dropped."""
+        key = (cue.profile, cue.lang, cue.layer, cue.template, cue.team_id, cue.anchor_player_id)
+        if cue.priority >= 3 and cue.layer not in NO_MEMORY:
+            last = self._aired.get(key)
+            if last is not None and cue.t_in - last < REPEAT_MS:
+                self.repeats.append(cue)
+                return None
+            self._aired[key] = cue.t_in
         feed = self.schedule[(cue.profile, cue.lang)]
         on_layer = [c for c in feed if c.layer == cue.layer and c.t_out > cue.t_in]
         if cue.layer in REPLACE_LAYERS:

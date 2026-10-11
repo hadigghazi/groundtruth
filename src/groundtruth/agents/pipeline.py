@@ -1,7 +1,8 @@
 """The agent team as one Microsoft Agent Framework graph workflow.
 
     Tactician -> Checker --pass--> Producer --fan-out--> Judge        ┐
-        ^          |                                     Persona (en) ├--fan-in--> Gate --> verified cards
+        ^          |                                     Challenger   |
+        |          |                                     Persona (en) ├--fan-in--> Gate --> verified cards
         |          |                                     Persona (es) |             |
         |          |                                     Persona (ar) ┘             |
         └--retry---┴---------------------------------------------------------------┤
@@ -13,6 +14,11 @@ alongside the writers instead of before them: the code checks have already
 passed, so the judge nearly always agrees, and waiting for it would add a
 whole model round trip to every card. When it disagrees, the writers' text is
 thrown away and the Tactician tries again with the judge's reasons.
+
+The Challenger argues for the strongest different explanation, at the same time.
+Code settles the argument: the detector's own cause score, computed from the
+evidence, for each side. The challenger wins only by a clear margin, and then
+the Tactician has to answer it on the retry.
 
 Every step writes to the shared insight board (the web app's agent trace)
 with its latency and token use.
@@ -32,12 +38,14 @@ from ..render.templates import word
 from ..schema import Moment
 from ..stats.engine import MINUTE, StatsEngine
 from .evidence import allowed_numbers, evidence_pack
-from .prompts import JUDGE, LANG_NAMES, MAX_NUMBERS, PERSONA, TACTICIAN, task
-from .schemas import Insight, Judgement, PersonaPair, Rewrite
+from .evidence import BASE_KEY, RECENT_KEY
+from .prompts import CHALLENGER, JUDGE, LANG_NAMES, MAX_NUMBERS, PERSONA, TACTICIAN, task
+from .schemas import Alternative, Insight, Judgement, PersonaPair, Rewrite
 from .verify import check_insight, check_rewrite
 
 MAX_ATTEMPTS = 2
 MODES = ("analyst", "casual")
+CHALLENGE_MARGIN = 1.0  # standardized units the challenger's cause score must lead by
 # The play time of the moment being explained. Tools count back from it, not from the live
 # edge, so a slow run (or an evaluation played faster than real time) never sees later play.
 AS_OF: ContextVar[int | None] = ContextVar("groundtruth_as_of", default=None)
@@ -82,6 +90,11 @@ class Part:
 
 @dataclass
 class Verdict(Part):
+    problems: list[str]
+
+
+@dataclass
+class Rebuttal(Part):
     problems: list[str]
 
 
@@ -261,6 +274,56 @@ class Judge(Executor):
         await ctx.send_message(Verdict(ok, problems))
 
 
+def arbitrate(stats: StatsEngine, pack: dict, ins: Insight, alt: Alternative) -> tuple[float | None, float | None, bool]:
+    """Scores both explanations with the detector's cause score; True if the alternative clearly wins."""
+    base = {tid: t.get(BASE_KEY, {}) for tid, t in pack["teams"].items()}
+    cur = {tid: t.get(RECENT_KEY, {}) for tid, t in pack["teams"].items()}
+
+    def score(cause: str, tid: str) -> float | None:
+        if cause not in stats.causes or tid not in base:
+            return None
+        s = stats._score(cause, tid, base, cur)
+        return round(s[0], 2) if s else None
+
+    mine, theirs = score(ins.cause, ins.team_id), score(alt.cause, alt.team_id)
+    if (alt.cause, alt.team_id) == (ins.cause, ins.team_id) or theirs is None:
+        return mine, theirs, False
+    bar = mine + CHALLENGE_MARGIN if mine is not None else stats.score_thresholds.get(alt.cause, 3.0)
+    return mine, theirs, theirs >= bar
+
+
+class Challenger(Executor):
+    def __init__(self, agent: Agent | None, stats: StatsEngine, board: Board):
+        super().__init__(id="challenger")
+        self.agent, self.stats, self.board = agent, stats, board
+
+    @handler
+    async def challenge(self, ok: Approved, ctx: WorkflowContext[Rebuttal]) -> None:
+        if self.agent is None:
+            await ctx.send_message(Rebuttal(ok, []))
+            return
+        t0, used, problems, alt = time.perf_counter(), {}, [], None
+        try:
+            resp = await self.agent.run(task({"task": "challenge", "evidence": ok.job.pack,
+                                              "explanation": ok.insight.model_dump()}),
+                                        options={"response_format": Alternative})
+            alt, used = _parse(Alternative, resp), usage(resp)
+        except Exception:
+            alt = None  # a failed challenge is no challenge
+        mine = theirs = None
+        wins = False
+        if alt is not None:
+            mine, theirs, wins = arbitrate(self.stats, ok.job.pack, ok.insight, alt)
+            if wins:
+                problems = [f"a challenger argued that {self.stats.team_name(alt.team_id)} changed ({alt.cause}): "
+                            f"{alt.argument} The signals support that more strongly "
+                            f"({theirs:g} against {mine if mine is not None else 'none'})."]
+        self.board(ok.job.moment.moment_id, "challenged", attempt=ok.job.attempt, ms=_ms(t0), ok=not wins,
+                   alt_cause=alt.cause if alt else None, alt_team=alt.team_id if alt else None,
+                   score=mine, alt_score=theirs, **used)
+        await ctx.send_message(Rebuttal(ok, problems))
+
+
 class Persona(Executor):
     def __init__(self, agent: Agent, lang: str, stats: StatsEngine, board: Board):
         super().__init__(id=f"persona_{lang}")
@@ -310,16 +373,17 @@ class Gate(Executor):
     async def decide(self, parts: list[Part], ctx: WorkflowContext[Job | Rejected, Outcome]) -> None:
         ok = parts[0].approved
         job, mid = ok.job, ok.job.moment.moment_id
-        problems = [p for part in parts if isinstance(part, Verdict) for p in part.problems]
+        problems = [p for part in parts if isinstance(part, (Verdict, Rebuttal)) for p in part.problems]
+        by = "challenger" if any(isinstance(p, Rebuttal) and p.problems for p in parts) else "judge"
         if not problems:
             written = [p for p in parts if isinstance(p, Written)]
             self.board(mid, "verified", attempt=job.attempt, cause=ok.insight.cause, team_id=ok.insight.team_id)
             await ctx.yield_output(Outcome(job.moment, ok.insight, written, [], job.attempt))
         elif job.attempt < MAX_ATTEMPTS:
-            self.board(mid, "rejected", attempt=job.attempt, by="judge", problems=problems)
+            self.board(mid, "rejected", attempt=job.attempt, by=by, problems=problems)
             await ctx.send_message(Job(job.moment, job.pack, job.attempt + 1, problems, job.tool_numbers))
         else:
-            self.board(mid, "rejected", attempt=job.attempt, by="judge", problems=problems, final=True)
+            self.board(mid, "rejected", attempt=job.attempt, by=by, problems=problems, final=True)
             await ctx.send_message(Rejected(job, problems))
 
 
@@ -340,7 +404,8 @@ class AgentTeam:
     """Builds one workflow per moment from shared agents, so moments run concurrently."""
 
     def __init__(self, large_client, small_client, stats: StatsEngine, causes: dict, board: Board,
-                 langs: tuple[str, ...] = ("en", "es", "ar"), use_judge: bool = True, backup: bool = True):
+                 langs: tuple[str, ...] = ("en", "es", "ar"), use_judge: bool = True, backup: bool = True,
+                 challenger: bool = True):
         self.stats, self.causes, self.board, self.langs = stats, causes, board, langs
         self.tool_numbers: list[float] = []
         tools = make_tools(stats, self.tool_numbers)
@@ -348,6 +413,7 @@ class AgentTeam:
         self.backup = (Agent(client=small_client, name="TacticianBackup", instructions=TACTICIAN, tools=tools)
                        if backup and small_client is not large_client else None)
         self.judge = Agent(client=small_client, name="VerifierJudge", instructions=JUDGE) if use_judge else None
+        self.challenger = Agent(client=small_client, name="Challenger", instructions=CHALLENGER) if challenger else None
         self.writers = {lang: Agent(client=small_client, name=f"Persona_{lang}", instructions=PERSONA)
                         for lang in langs}
 
@@ -356,6 +422,7 @@ class AgentTeam:
         checker = Checker(self.causes, self.board)
         producer = Producer(self.board)
         judge = Judge(self.judge, self.board)
+        rival = Challenger(self.challenger, self.stats, self.board)
         personas = [Persona(self.writers[lang], lang, self.stats, self.board) for lang in self.langs]
         gate = Gate(self.board)
         fallback = Fallback(self.board)
@@ -364,8 +431,8 @@ class AgentTeam:
                 .add_edge(checker, tactician, condition=lambda m: isinstance(m, Job))
                 .add_edge(checker, producer, condition=lambda m: isinstance(m, Approved))
                 .add_edge(checker, fallback, condition=lambda m: isinstance(m, Rejected))
-                .add_fan_out_edges(producer, [judge, *personas])
-                .add_fan_in_edges([judge, *personas], gate)
+                .add_fan_out_edges(producer, [judge, rival, *personas])
+                .add_fan_in_edges([judge, rival, *personas], gate)
                 .add_edge(gate, tactician, condition=lambda m: isinstance(m, Job))
                 .add_edge(gate, fallback, condition=lambda m: isinstance(m, Rejected))
                 .build())

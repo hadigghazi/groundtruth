@@ -263,6 +263,9 @@ button { font: inherit; }
 .trace-reject strong { color: var(--gt-coral); font: 700 11px var(--gt-display); text-transform: uppercase; letter-spacing: 0.12em; }
 .trace-reject ul { margin: 2px 0 0; padding-inline-start: 16px; color: #e8c4c4; }
 .trace-note { margin: 6px 0 0; font-size: 12px; color: var(--gt-amber); }
+.trace-challenge { margin: 6px 0 0; font-size: 12px; }
+.trace-challenge strong { font: 700 11px var(--gt-display); text-transform: uppercase; letter-spacing: 0.12em; color: #8ec5ff; }
+.trace-challenge.won strong { color: var(--gt-coral); }
 
 .perf-hero { display: grid; gap: 3px; padding: 6px 0 14px; }
 .perf-big { font: 700 60px/1 var(--gt-display); font-variant-numeric: tabular-nums; }

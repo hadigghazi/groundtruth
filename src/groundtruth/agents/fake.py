@@ -91,7 +91,7 @@ class _ScriptedClient(BaseChatClient):
         kind = task.get("task", "")
         self.calls.append(kind)
         reply = {"tactician": self._tactician, "judge": self._judge, "persona": self._persona,
-                 "recap": self._recap, "ask": self._ask}.get(
+                 "recap": self._recap, "ask": self._ask, "challenge": self._challenge}.get(
             kind, lambda t: {"error": "unknown task"})(task)
 
         async def respond() -> ChatResponse:
@@ -137,6 +137,10 @@ class _ScriptedClient(BaseChatClient):
                                            after=_fmt(key, claims["after"]["value"]))
         return {"analyst": {"headline": head, "body": analyst}, "casual": {"headline": head, "body": BODY[lang][1]}}
 
+
+    def _challenge(self, task: dict) -> dict:
+        ex = task["explanation"]  # the scripted challenger concedes: no better explanation
+        return {"team_id": ex["team_id"], "cause": ex["cause"], "argument": "The same signals point the same way."}
 
     @staticmethod
     def _score(b: dict) -> tuple[str, str, int, int, int]:

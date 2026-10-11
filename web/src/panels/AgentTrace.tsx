@@ -14,6 +14,7 @@ function lanes(entries: BoardEntry[], langs: string[], s: ReturnType<typeof stri
     tactician: { key: "tactician", label: s.lane.tactician, bars: [], ticks: [] },
     checker: { key: "checker", label: s.lane.checker, bars: [], ticks: [] },
     judge: { key: "judge", label: s.lane.judge, bars: [], ticks: [] },
+    challenger: { key: "challenger", label: s.lane.challenger, bars: [], ticks: [] },
     ...Object.fromEntries(langs.map((l) => [`written_${l}`, { key: `written_${l}`, label: `${s.lane.writer} ${l.toUpperCase()}`, bars: [], ticks: [] }])),
     gate: { key: "gate", label: s.lane.gate, bars: [], ticks: [] },
   };
@@ -21,6 +22,7 @@ function lanes(entries: BoardEntry[], langs: string[], s: ReturnType<typeof stri
     const at = e.at_ms - t0, ms = Number(e.ms ?? 0), attempt = Number(e.attempt ?? 1);
     if (e.stage === "drafted") rows.tactician.bars.push({ start: at - ms, end: at, ok: !!e.ok, attempt, title: `${ms} ms` });
     else if (e.stage === "judged") rows.judge.bars.push({ start: at - ms, end: at, ok: !!e.ok, attempt, title: `${ms} ms` });
+    else if (e.stage === "challenged") rows.challenger.bars.push({ start: at - ms, end: at, ok: !!e.ok, attempt, title: `${ms} ms` });
     else if (e.stage.startsWith("written_") && rows[e.stage]) {
       const failed = Array.isArray(e.failed) && (e.failed as string[]).length > 0;
       rows[e.stage].bars.push({ start: at - ms, end: at, ok: !failed, attempt, title: `${ms} ms` });
@@ -105,6 +107,12 @@ export function AgentTrace({ board, meta, moments, langs, lang }: {
             </header>
             <MomentLanes entries={entries} langs={langs} lang={lang} />
             {typeof draft?.headline === "string" && <p className="trace-quote">“{draft.headline}”</p>}
+            {entries.filter((e) => e.stage === "challenged" && e.alt_cause && (e.alt_cause !== verified?.cause || e.alt_team !== verified?.team_id)).map((e, i) => (
+              <p key={i} className={`trace-challenge ${e.ok ? "held" : "won"}`}>
+                <strong>{s.lane.challenger}</strong> {team(e.alt_team)?.short_name ?? ""} · {cause(e.alt_cause)}
+                <span className="muted"> ({String(e.alt_score ?? "–")} v {String(e.score ?? "–")}) · {e.ok ? s.challengeHeld : s.challengeWon}</span>
+              </p>
+            ))}
             {rejections.map((r, i) => (
               <div className="trace-reject" key={i}>
                 <strong>{r.by === "judge" ? s.lane.judge : s.lane.checker}</strong>
