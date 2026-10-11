@@ -193,6 +193,7 @@ def console(match_id: str, req: Console) -> dict:
 def set_speed(match_id: str, req: Speed) -> dict:
     s = _session(match_id)
     s.speed = req.speed
+    s.publish({"type": "speed", "speed": s.speed})
     return {"ok": True, "speed": s.speed}
 
 
@@ -211,7 +212,7 @@ async def stream(ws: WebSocket, match_id: str) -> None:
         await ws.send_json({"type": "hello", "meta": s.meta.model_dump(mode="json"), "speed": s.speed,
                             "delay_s": DELAY_S, "state": s.stats.snapshot(), "outage": s.outage,
                             "cues": [c.model_dump(mode="json") for c in recent], "board": board[-300:],
-                            "console": s.console_log, "agents": summarize(s.agent_runs),
+                            "console": s.console_log, "agents": summarize(s.agent_runs), "runs": s.agent_runs,
                             "full_time": s.full_time_card})
         if s.last_frame:
             await ws.send_json(s.last_frame)

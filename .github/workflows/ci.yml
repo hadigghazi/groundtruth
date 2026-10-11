@@ -60,6 +60,41 @@ jobs:
           cache-from: type=gha,scope=app
           cache-to: type=gha,scope=app,mode=max
 
+  ui:
+    # Runs the built app in headless Chromium and screenshots every screen (artifact "screens").
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: app
+          load: true
+          tags: groundtruth:ci
+          cache-from: type=gha,scope=app
+      - run: docker run -d --name gt -p 8000:8000 groundtruth:ci
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Screenshots, English and Arabic, desktop and phone
+        working-directory: web
+        run: |
+          for i in $(seq 1 30); do curl -fsS localhost:8000/api/health && break; sleep 2; done
+          npm install --no-save --no-audit --no-fund playwright@1
+          npx playwright install --with-deps chromium
+          BASE=http://localhost:8000 OUT=shots node e2e/screens.mjs
+      - name: Server log
+        if: always()
+        run: docker logs gt 2>&1 | tail -80
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screens
+          path: web/shots
+
   infra:
     # Compile the Bicep so template errors show up on every push, deployed or not.
     runs-on: ubuntu-latest

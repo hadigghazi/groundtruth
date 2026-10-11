@@ -1,12 +1,15 @@
 // The client-side match buffer: everything the stream sends, and a delayed playhead.
 //
 // Like a live broadcast, the viewer watches a few seconds behind real time. The delay
-// gives the agents time to explain a moment, so its overlay lands with the moment
-// instead of after it. Frames arrive at up to 25 a second; the views interpolate.
+// gives the agents time to explain a moment, so its verified card usually replaces the
+// template before the viewer reaches it. Frames arrive at up to 25 a second; the views
+// interpolate.
 
-import type { BoardEntry, Cue, Frame, Lang, MatchEvent, MatchMeta, Mode, Moment, State, StreamMessage } from "./api";
+import type {
+  AgentRun, AgentSummary, BoardEntry, Cue, Frame, Lang, MatchEvent, MatchMeta, Mode, Moment, Scorecard, State, StreamMessage,
+} from "./api";
 
-export const AGENT_BUDGET_S = 12; // must match the server's agent budget
+export const MIN_READ_S = 5; // a card stays up at least this long in wall time, whatever the replay speed
 
 export interface Viewer { mode: Mode; lang: Lang; club: string | null; player: string | null }
 
@@ -18,12 +21,20 @@ export class MatchBuffer {
   moments: Moment[] = [];
   cues: Cue[] = [];
   board: BoardEntry[] = [];
+  runs: AgentRun[] = [];
+  summary: AgentSummary | null = null;
+  scorecard: Scorecard | null = null;
   console: { team_id: string; label: string; clock_ms: number; period: number }[] = [];
   fullTime = false;
+  outage = false;
   speed = 1;
+  delayS = 12;
   private listeners = new Set<() => void>();
   private version = 0;
   private eventsById = new Map<string, MatchEvent>();
+  private cueIndex = new Map<string, number>();
+  /** cue id -> the cues that replace it, so a viewer can swap a template for its upgrade */
+  private replacedBy = new Map<string, Cue[]>();
 
   subscribe = (fn: () => void) => { this.listeners.add(fn); return () => { this.listeners.delete(fn); }; };
   snapshot = () => this.version;
@@ -31,30 +42,47 @@ export class MatchBuffer {
 
   handle(m: StreamMessage) {
     switch (m.type) {
-      case "hello": this.meta = m.meta; this.state = m.state; this.speed = m.speed; m.cues.forEach((c) => this.addCue(c)); break;
+      case "hello":
+        this.meta = m.meta; this.state = m.state; this.speed = m.speed; this.delayS = m.delay_s ?? 12;
+        this.outage = !!m.outage; this.summary = m.agents ?? null; this.scorecard = m.full_time ?? null;
+        this.fullTime = !!m.full_time;
+        m.cues.forEach((c) => this.addCue(c));
+        if (m.board) this.board = m.board;
+        if (m.runs) this.runs = m.runs;
+        if (m.console) this.console = m.console;
+        break;
       case "frame": this.frames.push(m); if (this.frames.length > 6000) this.frames.splice(0, 1000); return; // frames do not re-render React
       case "event": this.events.push(m.event); this.eventsById.set(m.event.event_id, m.event); break;
       case "moment": this.moments.push(m.moment); break;
       case "cue": this.addCue(m.cue); break;
       case "state": this.state = m.state; break;
       case "board": this.board.push(m.entry); break;
+      case "agent_run": this.runs.push(m.run); this.summary = m.summary; break;
       case "console": this.console.push(m); break;
-      case "full_time": this.fullTime = true; break;
+      case "outage": this.outage = m.on; break;
+      case "speed": this.speed = m.speed; break;
+      case "full_time": this.fullTime = true; this.scorecard = m.scorecard; this.summary = m.agents; break;
       default: return;
     }
     this.bump();
   }
 
   private addCue(c: Cue) {
-    const i = this.cues.findIndex((x) => x.cue_id === c.cue_id);
-    if (i >= 0) this.cues[i] = c; else this.cues.push(c);
+    const i = this.cueIndex.get(c.cue_id);
+    if (i !== undefined) this.cues[i] = c;
+    else { this.cueIndex.set(c.cue_id, this.cues.length); this.cues.push(c); }
+    for (const id of c.replaces ?? []) {
+      const list = this.replacedBy.get(id) ?? [];
+      if (!list.some((x) => x.cue_id === c.cue_id)) list.push(c);
+      this.replacedBy.set(id, list);
+    }
   }
 
   event(id: string) { return this.eventsById.get(id); }
 
   get liveT() { return this.frames.length ? this.frames[this.frames.length - 1].t : 0; }
-  /** Match-time delay: the agents' wall-clock budget, scaled by replay speed. */
-  get delayMs() { return this.speed > 0 ? AGENT_BUDGET_S * 1000 * this.speed : 0; }
+  /** Match-time delay: the broadcast delay in wall seconds, scaled by replay speed. */
+  get delayMs() { return this.speed > 0 ? this.delayS * 1000 * this.speed : 0; }
 
   /** The frame state at play time t, interpolated between the two nearest frames. */
   frameAt(t: number): Frame | null {
@@ -103,11 +131,19 @@ export class MatchBuffer {
     };
   }
 
-  /** Cues on screen at play time t for one viewer. */
+  /** True if this viewer gets an upgrade of `c` instead of `c` itself. */
+  private upgraded(c: Cue, v: Viewer) {
+    const by = this.replacedBy.get(c.cue_id);
+    return !!by && by.some((r) => r.lang === v.lang && (r.profile === "all" || r.profile === v.mode));
+  }
+
+  /** Cues on screen at play time t for one viewer, held long enough to read at any replay speed. */
   activeCues(t: number, v: Viewer): Cue[] {
+    const hold = MIN_READ_S * 1000 * Math.max(this.speed, 1);
     return this.cues.filter((c) => {
-      if (c.lang !== v.lang || t < c.t_in || t >= c.t_out) return false;
+      if (c.lang !== v.lang || t < c.t_in || t >= Math.max(c.t_out, c.t_in + hold)) return false;
       if (c.profile !== "all" && c.profile !== v.mode) return false;
+      if (this.upgraded(c, v)) return false;
       if (v.mode === "casual") {
         if (c.priority >= 4 && c.layer !== "player_tag") return false; // a casual viewer gets fewer, bigger overlays
         if (c.layer === "player_tag" && v.player && c.anchor_player_id !== v.player) return false;
@@ -115,5 +151,10 @@ export class MatchBuffer {
       if (v.club && c.team_id && c.team_id !== v.club && c.priority >= 3 && c.layer !== "fullscreen") return false;
       return true;
     });
+  }
+
+  /** The run that produced a verified cue, for "verified in 3.4 s". */
+  runFor(momentId: string | null | undefined) {
+    return momentId ? this.runs.find((r) => r.moment_id === momentId) : undefined;
   }
 }

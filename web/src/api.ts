@@ -24,6 +24,7 @@ export interface Cue {
   layer: "ticker" | "lower_third" | "player_tag" | "pitch_overlay" | "stat_panel" | "fullscreen";
   template: string; priority: number; profile: string; lang: Lang; team_id?: string | null; anchor_player_id?: string | null;
   headline: string; body?: string | null; metrics: CueMetric[]; evidence: string[]; verified: boolean; fallback: boolean; path: string[];
+  replaces?: string[];
 }
 
 export interface BoardEntry { moment_id: string; stage: string; at_ms: number; [k: string]: unknown }
@@ -34,8 +35,31 @@ export interface State {
   teams: Record<string, Record<string, number | null>>; recent: Record<string, TeamWindow>; recent_min: number; control_chaos: number | null;
 }
 
+export interface AgentRun {
+  moment_id: string; t: number; minute: number; period: number;
+  outcome: "verified" | "fallback" | "timeout" | "error" | "guarded" | "outage"; attempts: number; first_pass: boolean;
+  total_ms: number; tactician_ms: number; judge_ms: number | null; writers_ms: number | null; rejected_by: string[];
+  backup_used: boolean; tokens_in: number; tokens_out: number;
+  rule_cause?: string | null; flagged_team?: string | null; cause?: string | null; team_id?: string | null;
+}
+export interface AgentSummary {
+  runs: number; verified: number; first_pass_rate: number | null; fallback_rate: number | null;
+  verified_ms: { p50: number | null; p95: number | null; max: number | null };
+  stage_p50_ms: { tactician_ms: number | null; judge_ms: number | null; writers_ms: number | null };
+  rejections: { code: number; judge: number }; backup_used: number; tokens_per_run: number | null;
+  outcomes: Record<string, number>;
+}
+export interface ScoreSide { changes: number; alerts: number; caught: number; right_cause: number; false_alarms: number; median_delay_min: number | null }
+export interface ScoreRow { caught: boolean; right_cause: boolean; said: string | null; delay_min: number | null }
+export interface Scorecard {
+  rule: ScoreSide; agents: ScoreSide; window_min: number; agents_verified: number;
+  changes: { team_id: string; label: string; source: string; period: number; clock_ms: number; rule: ScoreRow; agents: ScoreRow }[];
+}
+
 export type StreamMessage =
-  | { type: "hello"; meta: MatchMeta; state: State; cues: Cue[]; speed: number }
+  | { type: "hello"; meta: MatchMeta; state: State; cues: Cue[]; speed: number; delay_s: number; outage: boolean;
+      board: BoardEntry[]; console: { team_id: string; label: string; t: number; period: number; clock_ms: number }[];
+      agents: AgentSummary; runs: AgentRun[]; full_time: Scorecard | null }
   | Frame
   | { type: "event"; event: MatchEvent }
   | { type: "moment"; moment: Moment }
@@ -43,7 +67,10 @@ export type StreamMessage =
   | { type: "state"; state: State }
   | { type: "board"; entry: BoardEntry }
   | { type: "console"; team_id: string; label: string; t: number; period: number; clock_ms: number }
-  | { type: "full_time"; score: number[] }
+  | { type: "full_time"; score: number[]; scorecard: Scorecard; agents: AgentSummary }
+  | { type: "agent_run"; run: AgentRun; summary: AgentSummary }
+  | { type: "outage"; on: boolean }
+  | { type: "speed"; speed: number }
   | { type: "ping" };
 
 export interface Club { club_id: string; name: string; short_name: string; ground: string; colors: string[]; formation: string; players: { player_id: string; name: string; number: number; role: string }[] }
@@ -65,6 +92,10 @@ export const api = {
   speed: (id: string, speed: number) =>
     fetch(`/api/matches/${id}/speed`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ speed }) })
       .then((r) => json<{ ok: boolean; speed: number }>(r)),
+  outage: (id: string, on: boolean) =>
+    fetch(`/api/matches/${id}/agents/outage`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ on }) })
+      .then((r) => json<{ ok: boolean; outage: boolean }>(r)),
+  agents: (id: string) => fetch(`/api/matches/${id}/agents`).then((r) => json<{ runs: AgentRun[]; summary: AgentSummary }>(r)),
   truth: (id: string) => fetch(`/api/matches/${id}/truth`).then((r) => json<{ label: string; team_id: string; period: number; clock_ms: number; source: string }[]>(r)),
 };
 
