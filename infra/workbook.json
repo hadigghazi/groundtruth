@@ -1,0 +1,55 @@
+{
+ "version": "Notebook/1.0",
+ "items": [
+  {
+   "type": 1,
+   "content": {
+    "json": "## GroundTruth agents\nTime from a flagged moment to a verified card, per agent step, fallbacks and model tokens, from the traces every role sends to Application Insights."
+   }
+  },
+  {
+   "type": 3,
+   "content": {
+    "version": "KqlItem/1.0",
+    "title": "Moment to verified card (ms)",
+    "visualization": "table",
+    "query": "dependencies | union requests | where name == 'groundtruth.explain_moment' | extend verified = tostring(customDimensions['groundtruth.verified']) | summarize runs = count(), p50 = percentile(duration, 50), p95 = percentile(duration, 95) by verified",
+    "queryType": 0,
+    "resourceType": "microsoft.insights/components"
+   }
+  },
+  {
+   "type": 3,
+   "content": {
+    "version": "KqlItem/1.0",
+    "title": "Each agent's model calls (ms)",
+    "visualization": "barchart",
+    "query": "dependencies | where name startswith 'invoke_agent' or name startswith 'chat' | summarize p50 = percentile(duration, 50), p95 = percentile(duration, 95) by name",
+    "queryType": 0,
+    "resourceType": "microsoft.insights/components"
+   }
+  },
+  {
+   "type": 3,
+   "content": {
+    "version": "KqlItem/1.0",
+    "title": "Tokens per hour",
+    "visualization": "timechart",
+    "query": "dependencies | where name startswith 'chat' | extend tokens = toint(customDimensions['gen_ai.usage.input_tokens']) + toint(customDimensions['gen_ai.usage.output_tokens']) | summarize tokens = sum(tokens) by bin(timestamp, 1h)",
+    "queryType": 0,
+    "resourceType": "microsoft.insights/components"
+   }
+  },
+  {
+   "type": 3,
+   "content": {
+    "version": "KqlItem/1.0",
+    "title": "Warnings and errors by role",
+    "visualization": "table",
+    "query": "traces | where severityLevel >= 2 | summarize count() by cloud_RoleName, message | top 20 by count_",
+    "queryType": 0,
+    "resourceType": "microsoft.insights/components"
+   }
+  }
+ ]
+}

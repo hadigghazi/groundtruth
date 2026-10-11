@@ -330,6 +330,7 @@ resource large 'Microsoft.CognitiveServices/accounts/deployments@2025-06-01' = {
   sku: { name: 'GlobalStandard', capacity: largeModel.capacity }
   properties: {
     model: { format: 'OpenAI', name: largeModel.name, version: largeModel.version }
+    raiPolicyName: 'Microsoft.DefaultV2' // harm filters on every call, prompt shields on the Ask box
   }
 }
 
@@ -339,6 +340,7 @@ resource small 'Microsoft.CognitiveServices/accounts/deployments@2025-06-01' = {
   sku: { name: 'GlobalStandard', capacity: smallModel.capacity }
   properties: {
     model: { format: 'OpenAI', name: smallModel.name, version: smallModel.version }
+    raiPolicyName: 'Microsoft.DefaultV2'
   }
   dependsOn: [large] // one deployment at a time on an account
 }
@@ -524,6 +526,21 @@ resource overlayPolicy 'Microsoft.ApiManagement/service/apis/policies@2023-09-01
   properties: {
     format: 'rawxml'
     value: '<policies><inbound><base /><rate-limit-by-key calls="120" renewal-period="60" counter-key="@(context.Subscription.Id)" /></inbound><backend><base /></backend><outbound><base /></outbound><on-error><base /></on-error></policies>'
+  }
+}
+
+// ---------------------------------------------------------- the ops workbook
+
+resource opsWorkbook 'Microsoft.Insights/workbooks@2023-06-01' = {
+  name: guid(resourceGroup().id, 'groundtruth-ops')
+  location: location
+  tags: tags
+  kind: 'shared'
+  properties: {
+    displayName: 'GroundTruth agents'
+    category: 'workbook'
+    sourceId: insights.id
+    serializedData: loadTextContent('workbook.json')
   }
 }
 
