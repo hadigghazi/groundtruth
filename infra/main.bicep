@@ -28,6 +28,9 @@ param smallModel object = { name: 'gpt-4.1-mini', version: '2025-04-14', capacit
 @description('Role definition id of "Azure AI User", resolved by CI. Empty skips the assignment.')
 param aiUserRoleId string = ''
 
+@description('Extra addresses for budget alerts (the subscription Owner always gets them).')
+param alertEmails array = []
+
 @description('Monthly budget for the resource group, in the billing currency.')
 param budgetAmount int = 60
 
@@ -270,9 +273,9 @@ resource budget 'Microsoft.Consumption/budgets@2023-11-01' = {
     timeGrain: 'Monthly'
     timePeriod: { startDate: budgetStart }
     notifications: {
-      actual50: { enabled: true, operator: 'GreaterThan', threshold: 50, contactRoles: ['Owner'] }
-      actual80: { enabled: true, operator: 'GreaterThan', threshold: 80, contactRoles: ['Owner'] }
-      forecast100: { enabled: true, operator: 'GreaterThan', threshold: 100, thresholdType: 'Forecasted', contactRoles: ['Owner'] }
+      actual50: { enabled: true, operator: 'GreaterThan', threshold: 50, contactRoles: ['Owner'], contactEmails: alertEmails }
+      actual80: { enabled: true, operator: 'GreaterThan', threshold: 80, contactRoles: ['Owner'], contactEmails: alertEmails }
+      forecast100: { enabled: true, operator: 'GreaterThan', threshold: 100, thresholdType: 'Forecasted', contactRoles: ['Owner'], contactEmails: alertEmails }
     }
   }
 }
