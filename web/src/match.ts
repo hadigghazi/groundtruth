@@ -49,9 +49,11 @@ export class MatchBuffer {
         m.cues.forEach((c) => this.addCue(c));
         if (m.board) this.board = m.board;
         if (m.runs) this.runs = m.runs;
+        if (m.moments) this.moments = m.moments;
+        for (const e of m.events ?? []) if (!this.eventsById.has(e.event_id)) { this.events.push(e); this.eventsById.set(e.event_id, e); }
         if (m.console) this.console = m.console;
         break;
-      case "frame": this.frames.push(m); if (this.frames.length > 6000) this.frames.splice(0, 1000); return; // frames do not re-render React
+      case "frame": this.frames.push(m); if (this.frames.length > 24000) this.frames.splice(0, 2000); return; // frames do not re-render React
       case "event": this.events.push(m.event); this.eventsById.set(m.event.event_id, m.event); break;
       case "moment": this.moments.push(m.moment); break;
       case "cue": this.addCue(m.cue); break;
@@ -125,9 +127,11 @@ export class MatchBuffer {
   timeOfClock() {
     const starts = new Map<number, { t: number; clock: number }>();
     for (const f of this.frames) if (!starts.has(f.period)) starts.set(f.period, { t: f.t, clock: f.clock_ms });
+    const firstPeriod = this.frames.length ? this.frames[0].period : 1;
     return (period: number, clock: number) => {
       const s = starts.get(period);
-      return s ? s.t + (clock - s.clock) : Number.POSITIVE_INFINITY;
+      if (s) return s.t + (clock - s.clock);
+      return period < firstPeriod ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY; // before we joined: already past
     };
   }
 

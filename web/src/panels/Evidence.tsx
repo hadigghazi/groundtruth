@@ -2,14 +2,14 @@
 // them, and for an agent card, the run that wrote it.
 
 import { Button } from "@fluentui/react-components";
-import { Dismiss20Regular } from "@fluentui/react-icons";
+import { ArrowCounterclockwise20Regular, Dismiss20Regular } from "@fluentui/react-icons";
 import type { BoardEntry, Cue, Lang, MatchEvent } from "../api";
 import { fmtMetric } from "../Overlays";
 import { clock, dir, strings } from "../i18n";
 import { MomentLanes } from "./AgentTrace";
 
-export function Evidence({ cue, events, board, langs, lang, onClose }: {
-  cue: Cue; events: MatchEvent[]; board: BoardEntry[]; langs: string[]; lang: Lang; onClose: () => void;
+export function Evidence({ cue, events, board, langs, lang, onClose, onReplay }: {
+  cue: Cue; events: MatchEvent[]; board: BoardEntry[]; langs: string[]; lang: Lang; onClose: () => void; onReplay: () => void;
 }) {
   const s = strings(lang);
   const run = cue.moment_id ? board.filter((e) => e.moment_id === cue.moment_id) : [];
@@ -21,6 +21,7 @@ export function Evidence({ cue, events, board, langs, lang, onClose }: {
       </header>
       <p className="ev-head">{cue.headline}</p>
       {cue.body && <p className="ev-body">{cue.body}</p>}
+      <Button size="small" appearance="primary" icon={<ArrowCounterclockwise20Regular />} onClick={onReplay}>{s.replay}</Button>
       <ol className="ev-path" dir="ltr">
         {cue.path.map((p, i) => <li key={i} className={p === "template" ? "tmpl" : ""}>{p.replace(/_/g, " ")}</li>)}
       </ol>

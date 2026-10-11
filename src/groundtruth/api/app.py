@@ -213,6 +213,9 @@ async def stream(ws: WebSocket, match_id: str) -> None:
                             "delay_s": DELAY_S, "state": s.stats.snapshot(), "outage": s.outage,
                             "cues": [c.model_dump(mode="json") for c in recent], "board": board[-300:],
                             "console": s.console_log, "agents": summarize(s.agent_runs), "runs": s.agent_runs,
+                            # a late joiner still needs the score so far and the timeline's markers
+                            "events": [e.model_dump(mode="json", exclude_none=True) for e in s.key_events],
+                            "moments": [m.model_dump(mode="json") for m in s.stats.moments],
                             "full_time": s.full_time_card})
         if s.last_frame:
             await ws.send_json(s.last_frame)

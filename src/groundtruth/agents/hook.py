@@ -88,7 +88,9 @@ def attach_agents(session, kind: str | None = None, budget_s: float = 20.0, use_
             for cue in cues:
                 sess.upgrade_cue(cue, old.get(cue.lang))
             board(mid, "upgraded", cues=len(cues), ms=total_ms)
-            sess.agent_results[mid] = {"t": m.t, "team_id": outcome.insight.team_id, "cause": outcome.insight.cause}
+            ins = outcome.insight
+            sess.agent_results[mid] = {"t": m.t, "team_id": ins.team_id, "cause": ins.cause,
+                                       "text": f"{ins.headline}. {ins.explanation} {ins.why_it_matters}"}
             kind_ = "verified"
         sess.record_run(run_record(m, entries, kind_, total_ms, outcome.attempts if outcome else 0,
                                    outcome.insight if verified else None))

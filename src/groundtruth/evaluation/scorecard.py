@@ -28,7 +28,7 @@ def score(changes: list[dict], alerts: list[dict], window: int = WINDOW) -> dict
         if hit:
             delays.append((hit["t"] - ch["t"]) / MINUTE)
         rows.append({"caught": bool(near), "right_cause": bool(hit),
-                     "said": near[0]["cause"] if near else None,
+                     "said": (hit or near[0])["cause"] if near else None,
                      "delay_min": round((hit["t"] - ch["t"]) / MINUTE, 1) if hit else None})
     false_alarms = sum(not any(a["team_id"] == ch["team_id"] and 0 <= a["t"] - ch["t"] <= window for ch in changes)
                        for a in alerts)

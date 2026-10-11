@@ -59,7 +59,7 @@ export interface Scorecard {
 export type StreamMessage =
   | { type: "hello"; meta: MatchMeta; state: State; cues: Cue[]; speed: number; delay_s: number; outage: boolean;
       board: BoardEntry[]; console: { team_id: string; label: string; t: number; period: number; clock_ms: number }[];
-      agents: AgentSummary; runs: AgentRun[]; full_time: Scorecard | null }
+      agents: AgentSummary; runs: AgentRun[]; full_time: Scorecard | null; events?: MatchEvent[]; moments?: Moment[] }
   | Frame
   | { type: "event"; event: MatchEvent }
   | { type: "moment"; moment: Moment }

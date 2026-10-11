@@ -64,8 +64,8 @@ export function TacticalView({ meta, getFrame, focusPlayer, highlight, tags }: P
       // evidence: the events behind the open overlay
       for (const e of hl) {
         if (e.x == null || e.y == null) continue;
-        ctx.strokeStyle = "#ffd447";
-        ctx.fillStyle = "#ffd447";
+        ctx.strokeStyle = "#c6ff3d";
+        ctx.fillStyle = "#c6ff3d";
         ctx.lineWidth = 2;
         if (e.end_x != null && e.end_y != null) {
           ctx.beginPath(); ctx.moveTo(X(e.x), Y(e.y)); ctx.lineTo(X(e.end_x), Y(e.end_y)); ctx.stroke();
@@ -81,10 +81,10 @@ export function TacticalView({ meta, getFrame, focusPlayer, highlight, tags }: P
         ctx.fillStyle = info.gk ? info.alt : info.color;
         ctx.fill();
         ctx.lineWidth = pid === focus ? 3 : 1.2;
-        ctx.strokeStyle = pid === focus ? "#ffd447" : "rgba(0,0,0,0.55)";
+        ctx.strokeStyle = pid === focus ? "#c6ff3d" : "rgba(0,0,0,0.55)";
         ctx.stroke();
         ctx.fillStyle = info.gk ? info.color : info.alt;
-        ctx.font = `600 ${Math.round(r * 1.05)}px system-ui, sans-serif`;
+        ctx.font = `600 ${Math.round(r * 1.05)}px 'Barlow Condensed', system-ui, sans-serif`;
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         ctx.fillText(String(info.number), X(x), Y(y) + 0.5);
@@ -101,12 +101,12 @@ export function TacticalView({ meta, getFrame, focusPlayer, highlight, tags }: P
         const p = where.get(t.player_id);
         if (!p) continue;
         const text = t.body ? `${t.headline} · ${t.body}` : t.headline;
-        ctx.font = "600 12px system-ui, sans-serif";
+        ctx.font = "600 12px 'Barlow Condensed', system-ui, sans-serif";
         const tw = ctx.measureText(text).width + 12;
         const tx = X(p[1]) - tw / 2, ty = Y(p[2]) - r - 24;
         ctx.fillStyle = "rgba(10,16,24,0.88)";
         ctx.fillRect(tx, ty, tw, 18);
-        ctx.fillStyle = "#ffd447";
+        ctx.fillStyle = "#c6ff3d";
         ctx.fillRect(tx, ty, 3, 18);
         ctx.fillStyle = "#fff";
         ctx.textAlign = "left";

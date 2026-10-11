@@ -66,9 +66,33 @@ def main(argv: list[str] | None = None) -> None:
     dr.add_argument("--workers", type=int, default=4)
     dr.add_argument("--write", type=Path, default=None, help="write the chosen detector config here")
 
+    ea = sub.add_parser("eval-agents", help="score the agent team on held-out matches against the truth log")
+    ea.add_argument("--seeds", type=int, nargs="+", default=None, help="default: the detector's test seeds")
+    ea.add_argument("--speed", type=float, default=8.0, help="replay speed; agents work in wall-clock time")
+    ea.add_argument("--llm", default=None, help="scripted, openai or foundry (default: GROUNDTRUTH_LLM)")
+    ea.add_argument("--concurrency", type=int, default=4)
+    ea.add_argument("--write", type=Path, default=None)
+
+    sub.add_parser("schema", help="print the overlay cue's JSON Schema")
     sub.add_parser("league", help="print the fictional league")
     args = ap.parse_args(argv)
     league = build_league()
+
+    if args.cmd == "eval-agents":
+        from .evaluation.agents import evaluate
+        result = evaluate(args.seeds, speed=args.speed, kind=args.llm, concurrency=args.concurrency)
+        text = json.dumps(result, indent=2)
+        if args.write:
+            args.write.write_text(text, encoding="utf-8")
+        print(text)
+        return
+
+    if args.cmd == "schema":
+        from .schema import SCHEMA_VERSION, Cue
+        print(json.dumps({"$schema": "https://json-schema.org/draft/2020-12/schema",
+                          "$id": f"urn:groundtruth:cue:{SCHEMA_VERSION}", "x-schema-version": SCHEMA_VERSION,
+                          **Cue.model_json_schema()}, indent=2))
+        return
 
     if args.cmd == "detector-report":
         from .evaluation.detector import choose, detection, effect_profile, noise_profile

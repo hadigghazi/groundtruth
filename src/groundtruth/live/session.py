@@ -48,6 +48,7 @@ class MatchSession:
         self.truth_t: list[int] = []  # play time at which each truth-log change took effect
         self.full_time_card: dict | None = None
         self._tasks: set[asyncio.Task] = set()
+        self.key_events: list = []  # goals and cards, replayed to anyone who joins late
 
     # ------------------------------------------------------------ fan-out
 
@@ -114,6 +115,8 @@ class MatchSession:
             moments = self.stats.feed_frame(frame)
             for ev in events:
                 moments += self.stats.feed_event(ev)
+                if ev.type in ("goal", "card"):
+                    self.key_events.append(ev)
                 self.publish({"type": "event", "event": ev.model_dump(mode="json", exclude_none=True)})
             for m in moments:
                 self._on_moment(m)

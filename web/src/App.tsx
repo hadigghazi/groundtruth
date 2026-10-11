@@ -11,6 +11,8 @@ import type { Club, Cue, Frame, Lang, Mode } from "./api";
 import { Crest } from "./Crest";
 import { LANG_LABEL, dir, fill, strings } from "./i18n";
 import { MatchBuffer, type Viewer } from "./match";
+import { usePlayhead } from "./playhead";
+import { Transport } from "./Transport";
 import { Overlays } from "./Overlays";
 import { AgentTrace } from "./panels/AgentTrace";
 import { Director } from "./panels/Director";
@@ -35,29 +37,9 @@ function savedLang(): Lang {
 }
 function saveLang(l: Lang) { try { localStorage.setItem("gt-lang", l); } catch { /* private mode */ } }
 
-/** A smooth, delayed playhead: advances with the wall clock, re-anchors to the live edge. */
-function usePlayhead(buf: MatchBuffer) {
-  const t = useRef(0);
-  const [slow, setSlow] = useState(0); // a 4 Hz copy for React-rendered overlays
-  useEffect(() => {
-    let raf = 0, last = performance.now(), lastSlow = 0;
-    const step = (now: number) => {
-      raf = requestAnimationFrame(step);
-      const target = Math.max(0, buf.liveT - buf.delayMs);
-      const dt = now - last;
-      last = now;
-      t.current = Math.abs(target - t.current) > 4000 ? target : Math.min(target, t.current + dt * Math.max(buf.speed, 1));
-      if (now - lastSlow > 250) { lastSlow = now; setSlow(t.current); }
-    };
-    raf = requestAnimationFrame(step);
-    return () => cancelAnimationFrame(raf);
-  }, [buf]);
-  return { t, slow };
-}
-
-function ViewerColumn({ buf, viewer, setViewer, view, getT, slowT, compact }: {
+function ViewerColumn({ buf, viewer, setViewer, view, getT, slowT, compact, seek }: {
   buf: MatchBuffer; viewer: Viewer; setViewer: (v: Viewer) => void; view: "broadcast" | "tactical";
-  getT: () => number; slowT: number; compact: boolean;
+  getT: () => number; slowT: number; compact: boolean; seek: (t: number) => void;
 }) {
   const meta = buf.meta!;
   const s = strings(viewer.lang);
@@ -108,13 +90,16 @@ function ViewerColumn({ buf, viewer, setViewer, view, getT, slowT, compact }: {
         )}
       </div>
       <div className="stage" dir="ltr">
-        {view === "broadcast"
-          ? <BroadcastView meta={meta} getFrame={getFrame} tags={tags} focusPlayer={viewer.player} />
-          : <TacticalView meta={meta} getFrame={getFrame} focusPlayer={viewer.player} highlight={evidence} tags={tags} />}
-        <Overlays meta={meta} cues={cues} score={buf.scoreAt(slowT)} period={frame?.period ?? 1} clockMs={frame?.clock_ms ?? 0}
-          lang={viewer.lang} fullTime={buf.fullTime && slowT >= buf.liveT - 1} scorecard={buf.scorecard}
-          runFor={(id) => buf.runFor(id)} onOpen={setOpen} />
-        {open && <Evidence cue={open} events={evidence} board={buf.board} langs={langs} lang={viewer.lang} onClose={() => setOpen(null)} />}
+        <div className="frame">
+          {view === "broadcast"
+            ? <BroadcastView meta={meta} getFrame={getFrame} tags={tags} focusPlayer={viewer.player} compact={compact} />
+            : <TacticalView meta={meta} getFrame={getFrame} focusPlayer={viewer.player} highlight={evidence} tags={tags} />}
+          <Overlays meta={meta} cues={cues} score={buf.scoreAt(slowT)} period={frame?.period ?? 1} clockMs={frame?.clock_ms ?? 0}
+            lang={viewer.lang} fullTime={buf.fullTime && slowT >= buf.liveT - 1} scorecard={buf.scorecard}
+            runFor={(id) => buf.runFor(id)} onOpen={setOpen} />
+        </div>
+        {open && <Evidence cue={open} events={evidence} board={buf.board} langs={langs} lang={viewer.lang} onClose={() => setOpen(null)}
+          onReplay={() => { seek(open.t_in - 15_000); setOpen(null); }} />}
       </div>
     </Local>
   );
@@ -137,7 +122,8 @@ function MatchScreen({ matchId }: { matchId: string }) {
       { mode: "analyst", lang: l === "en" ? "es" : "en", club: null, player: null },
     ];
   });
-  const { t, slow } = usePlayhead(buf);
+  const ph = usePlayhead(buf);
+  const { t, slow } = ph;
   const getT = useCallback(() => t.current, [t]);
 
   useEffect(() => openStream(matchId, (m) => buf.handle(m), () => undefined), [matchId, buf]);
@@ -158,7 +144,7 @@ function MatchScreen({ matchId }: { matchId: string }) {
   return (
     <Local lang={lead} className="match">
       <header className="topbar">
-        <a href="#" className="wordmark" aria-label="GroundTruth home"><Mark />Ground<span>Truth</span></a>
+        <a href="#" className="wordmark" dir="ltr" aria-label="GroundTruth home"><Mark /><span>Ground<b>Truth</b></span></a>
         <span className="fixture" dir="ltr">
           <Crest colors={meta.home.colors} code={meta.home.short_name} size={20} />
           <strong>{meta.home.name}</strong><span className="muted">v</span><strong>{meta.away.name}</strong>
@@ -188,10 +174,11 @@ function MatchScreen({ matchId }: { matchId: string }) {
           ))}
         </div>
       </header>
+      <Transport buf={buf} ph={ph} lang={lead} />
       <main className="match-body">
         <div className={`viewers n${layout}`}>
           {shown.map((v, i) => (
-            <ViewerColumn key={i} buf={buf} viewer={v} setViewer={setViewer(i)} view={view} getT={getT} slowT={slow} compact={layout === 4} />
+            <ViewerColumn key={i} buf={buf} viewer={v} setViewer={setViewer(i)} view={view} getT={getT} slowT={slow} compact={layout === 4} seek={ph.seek} />
           ))}
         </div>
         <aside className="side">
@@ -257,7 +244,7 @@ function Home({ onGo }: { onGo: (id: string) => void }) {
   return (
     <Local lang={lang} className="home">
       <header className="home-top">
-        <span className="wordmark"><Mark />Ground<span>Truth</span></span>
+        <span className="wordmark" dir="ltr"><Mark /><span>Ground<b>Truth</b></span></span>
         <Dropdown className="vb-dd" size="small" appearance="filled-darker" aria-label={s.language} value={LANG_LABEL[lang]}
           selectedOptions={[lang]} onOptionSelect={(_, d) => { const l = d.optionValue as Lang; setLang(l); saveLang(l); }}>
           {LANGS.map((l) => <Option key={l} value={l}>{LANG_LABEL[l]}</Option>)}

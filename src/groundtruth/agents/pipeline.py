@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 
 from agent_framework import Agent, Executor, WorkflowBuilder, WorkflowContext, handler, tool
@@ -37,6 +38,9 @@ from .verify import check_insight, check_rewrite
 
 MAX_ATTEMPTS = 2
 MODES = ("analyst", "casual")
+# The play time of the moment being explained. Tools count back from it, not from the live
+# edge, so a slow run (or an evaluation played faster than real time) never sees later play.
+AS_OF: ContextVar[int | None] = ContextVar("groundtruth_as_of", default=None)
 
 
 # ------------------------------------------------------------------ messages
@@ -140,8 +144,9 @@ def make_tools(stats: StatsEngine, record: list[float]):
     @tool(approval_mode="never_require")
     def team_window(team_id: str, minutes_back_start: int, minutes_back_end: int = 0) -> dict:
         """Metrics for one team over a stretch of play, counted back from now, e.g. 15 to 0 for the last 15 minutes."""
-        lo = stats.t - max(minutes_back_start, minutes_back_end + 1) * MINUTE
-        hi = stats.t - minutes_back_end * MINUTE
+        now = AS_OF.get() or stats.t
+        lo = now - max(minutes_back_start, minutes_back_end + 1) * MINUTE
+        hi = now - minutes_back_end * MINUTE
         return keep({k: round(v, 3) for k, v in stats.window_metrics(lo, hi)[team_id].items() if v is not None})
 
     @tool(approval_mode="never_require")
@@ -369,7 +374,11 @@ class AgentTeam:
         if announce:
             self.board(m.moment_id, "detected", kind=m.kind, team_id=m.team_id,
                        rule_cause=m.metrics.get("rule_cause"), score=m.metrics.get("score"))
-        result = await self._workflow().run(Job(m, pack, tool_numbers=self.tool_numbers))
+        token = AS_OF.set(m.t)
+        try:
+            result = await self._workflow().run(Job(m, pack, tool_numbers=self.tool_numbers))
+        finally:
+            AS_OF.reset(token)
         outputs = result.get_outputs()
         if not outputs:
             return Outcome(m, None, [], ["the workflow produced no output"], 0)

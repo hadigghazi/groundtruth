@@ -177,9 +177,11 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-      - run: pip install -e .
+      - run: pip install -e ".[agents]"
       - name: Simulate and print totals
         run: groundtruth calibrate --seeds ${{ github.event.inputs.seeds || '7 8 9 10' }}
+      - name: Agent evaluation harness, scripted (the real-model run needs Azure)
+        run: groundtruth eval-agents --seeds 400 401 --speed 0 --llm scripted --concurrency 2 | head -40
 
   fit:
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.fit == 'true'

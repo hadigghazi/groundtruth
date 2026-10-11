@@ -61,6 +61,7 @@ if (await page.locator(".gt-panel").count()) {
 }
 
 await page.getByRole("button", { name: "4 viewers" }).click();
+await page.mouse.move(10, 890); // move off the tooltip
 await page.waitForTimeout(3000);
 await shot("09-four-up");
 await page.getByRole("tab", { name: /Tactical/ }).click();
