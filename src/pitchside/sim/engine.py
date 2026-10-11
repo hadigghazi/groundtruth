@@ -46,7 +46,7 @@ def true_goal_prob(u: float, v: float, pressured: bool, finishing: float, header
     most of the goal, so `keeper_gap` (metres) scales the chance down.
     """
     dist = math.hypot(L - u, W / 2 - v)
-    z = -0.35 - 0.125 * dist + 1.0 * pitch.goal_angle(u, v) - 0.4 * pressured + 1.0 * (finishing - 0.5)
+    z = -0.8 - 0.125 * dist + 1.0 * pitch.goal_angle(u, v) - 0.4 * pressured + 1.0 * (finishing - 0.5)
     q = float(_sigmoid(z - (0.7 if header else 0.0)))
     return q * float(np.clip(0.35 + 0.1 * keeper_gap, 0.35, 1.0))
 
@@ -529,8 +529,10 @@ class MatchEngine:
         self.received_ms = now
         self.carry_start = (self.pos[j].copy(), now)
         self.pressured_by = set()
-        hold = self.rng.uniform(3.0, 7.0) if reason == "save" else self.rng.uniform(0.25, 0.6)
-        self.next_decision_ms = now + int(hold * 1000)
+        if reason == "save":
+            self.next_decision_ms = now + int(self.rng.uniform(3.0, 7.0) * 1000)
+        else:  # time on the ball before the first decision, set by tempo and pressure
+            self.next_decision_ms = now + self._decision_delay(j, self._nearest_opponent(j) < 3.0)
         self.carry_dir = self._carry_dir(j)
         self.ball[:2] = self.pos[j]
         self.ball[2] = 0.0
@@ -678,7 +680,7 @@ class MatchEngine:
             self.yellow[j] = True
             self._emit("card", team_id=self.team_ids[o], player_id=self.pid[j], card="yellow", **self._xy(loc))
         u, v = pitch.to_team(loc, self.dir[t])
-        if pitch.in_box(u, v) and self.rng.random() < 0.3:
+        if pitch.in_box(u, v) and self.rng.random() < 0.15:
             spot = pitch.from_team(np.array([L - 11.0, W / 2]), self.dir[t])
             self._set_dead("penalty", t, spot, self.rng.uniform(40, 70))
         else:
