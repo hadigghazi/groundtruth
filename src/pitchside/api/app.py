@@ -187,3 +187,13 @@ def _attach_agents(s: MatchSession) -> None:
 _web = os.environ.get("PITCHSIDE_WEB_DIR")
 if _web and Path(_web).is_dir():  # the built web app, served after every /api route
     app.mount("/", StaticFiles(directory=_web, html=True), name="web")
+
+
+if os.environ.get("APPLICATIONINSIGHTS_CONNECTION_STRING"):
+    # Traces from every agent run go to Application Insights, where Foundry's tracing view reads them.
+    try:
+        from microsoft.opentelemetry import use_microsoft_opentelemetry
+
+        use_microsoft_opentelemetry(enable_azure_monitor=True)
+    except Exception:
+        logging.getLogger("pitchside").exception("telemetry not configured")

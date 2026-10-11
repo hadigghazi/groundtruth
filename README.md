@@ -89,6 +89,19 @@ Agents use a deterministic scripted client unless a model is configured:
 | `OPENAI_API_KEY`, `OPENAI_BASE_URL` | for `openai` |
 | `FOUNDRY_PROJECT_ENDPOINT` | for `foundry` (managed identity or Azure CLI login) |
 
+### Deploy to Azure
+
+`infra/main.bicep` describes the whole deployment: a Container Apps app (API, agents, web),
+a Microsoft Foundry account and project with two model deployments, Event Hubs, a container
+registry, Log Analytics with Application Insights, and a budget. The app reaches Foundry,
+Event Hubs and the registry with a managed identity; there are no keys.
+
+1. In Azure Cloud Shell (Bash), run `infra/bootstrap.sh`. It creates the resource group and
+   an identity GitHub Actions signs in as through OpenID Connect, then prints three values.
+2. Set them as repository secrets (`AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`).
+3. Push to `main`. CI provisions, pushes the image, rolls out and smoke-tests; the job summary
+   shows the URL.
+
 Command line: `pitchside simulate`, `pitchside batch`, `pitchside calibrate`,
 `pitchside fit-models`, `pitchside detector-report`.
 
