@@ -46,7 +46,7 @@ def true_goal_prob(u: float, v: float, pressured: bool, finishing: float, header
     most of the goal, so `keeper_gap` (metres) scales the chance down.
     """
     dist = math.hypot(L - u, W / 2 - v)
-    z = -0.8 - 0.125 * dist + 1.0 * pitch.goal_angle(u, v) - 0.4 * pressured + 1.0 * (finishing - 0.5)
+    z = -1.1 - 0.125 * dist + 1.0 * pitch.goal_angle(u, v) - 0.4 * pressured + 1.0 * (finishing - 0.5)
     q = float(_sigmoid(z - (0.7 if header else 0.0)))
     return q * float(np.clip(0.35 + 0.1 * keeper_gap, 0.35, 1.0))
 
@@ -578,7 +578,7 @@ class MatchEngine:
                 self._emit("pressure", team_id=self.team_ids[o], player_id=self.pid[j], **self._xy(self.pos[j]))
         for j, dj in zip(opp, d_opp):
             if dj < 1.5 and now >= self.beaten_until[j]:
-                rate = 0.25 + 0.5 * self.tactics[o].press_intensity  # challenges per second at close range
+                rate = 0.15 + 0.35 * self.tactics[o].press_intensity  # challenges per second at close range
                 if self.rng.random() < rate * DT and self._tackle(int(j), c, now):
                     return
         if now >= self.next_decision_ms:
@@ -653,7 +653,7 @@ class MatchEngine:
         """A tackle attempt by j on the carrier c. True when play changes hands or stops."""
         o = int(self.team[j])
         loc = self.pos[c].copy()
-        if self.rng.random() < 0.12 + 0.08 * self.tactics[o].press_intensity:
+        if self.rng.random() < 0.10 + 0.05 * self.tactics[o].press_intensity:
             self._foul(j, c, now, loc)
             return True
         p_win = float(np.clip(0.45 + 0.35 * (self.tackling[j] - self.dribbling[c]), 0.2, 0.75))
@@ -715,14 +715,14 @@ class MatchEngine:
                 keeper_gap = float(np.linalg.norm(self.pos[self._gk(1 - self.team[c])] - self.pos[c]))
                 q = true_goal_prob(u, v, pressured, self.finishing[c], header=header, keeper_gap=keeper_gap)
                 if rk == "free_kick":
-                    p_shoot = 0.35 if dg < 28.0 and abs(v - W / 2) < 15.0 else 0.0
+                    p_shoot = 0.15 if dg < 28.0 and abs(v - W / 2) < 15.0 else 0.0
                     q *= 0.55
                 elif header:
                     p_shoot = 0.6
                 else:
                     blockers = len(self._defenders_in_cone(c))
-                    base = 0.03 if dg < 25.0 else 0.01
-                    p_shoot = float(np.clip(base + 0.55 * q, 0.0, 0.35)) * (0.6 if blockers >= 2 else 1.0)
+                    base = 0.02 if dg < 25.0 else 0.008
+                    p_shoot = float(np.clip(base + 0.45 * q, 0.0, 0.3)) * (0.6 if blockers >= 2 else 1.0)
                     if pitch.in_box(u, v) and self._nearest_opponent(c) < 2.0:
                         p_shoot *= 0.6  # a tight marker in the box
                 if self.rng.random() < p_shoot:
