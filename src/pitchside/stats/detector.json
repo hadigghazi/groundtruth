@@ -1,0 +1,141 @@
+{
+  "mode": "cause",
+  "causes": {
+    "high_press": [
+      [
+        "line_height_m",
+        "up",
+        2.59
+      ],
+      [
+        "block_height_adj_m",
+        "up",
+        2.14
+      ],
+      [
+        "block_height_m",
+        "up",
+        1.87
+      ]
+    ],
+    "low_block": [
+      [
+        "line_height_m",
+        "down",
+        1.69
+      ],
+      [
+        "block_height_adj_m",
+        "down",
+        1.6
+      ],
+      [
+        "def_action_height_m",
+        "down",
+        1.26
+      ]
+    ],
+    "go_direct": [
+      [
+        "time_on_ball_s",
+        "down",
+        3.37
+      ]
+    ],
+    "slow_down": [
+      [
+        "time_on_ball_s",
+        "up",
+        3.15
+      ],
+      [
+        "width_m",
+        "up",
+        1.07
+      ],
+      [
+        "width_adj_m",
+        "up",
+        0.91
+      ]
+    ],
+    "push_wide": [
+      [
+        "width_adj_m",
+        "up",
+        2.53
+      ],
+      [
+        "width_m",
+        "up",
+        1.59
+      ],
+      [
+        "long_pass_share",
+        "up",
+        0.89
+      ]
+    ]
+  },
+  "sd": {
+    "line_height_m": 2.8244,
+    "block_height_adj_m": 3.1439,
+    "block_height_m": 4.3195,
+    "def_action_height_m": 8.2845,
+    "time_on_ball_s": 0.3195,
+    "width_m": 1.9699,
+    "width_adj_m": 1.7006,
+    "long_pass_share": 0.0601
+  },
+  "score_thresholds": {
+    "high_press": 4.11,
+    "low_block": 3.014,
+    "go_direct": 2.285,
+    "slow_down": 2.627,
+    "push_wide": 2.809
+  },
+  "windows_min": {
+    "recent": 10,
+    "baseline": 20
+  },
+  "seeds": {
+    "noise": [
+      200,
+      201,
+      202,
+      203,
+      204,
+      205,
+      206,
+      207
+    ],
+    "select": [
+      300,
+      301,
+      302,
+      303,
+      304,
+      305,
+      306,
+      307,
+      308,
+      309,
+      310,
+      311
+    ],
+    "test": [
+      400,
+      401,
+      402,
+      403,
+      404,
+      405,
+      406,
+      407,
+      408,
+      409,
+      410,
+      411
+    ]
+  }
+}
