@@ -4,6 +4,9 @@ Each (profile, language) feed has its own schedule. A layer holds a fixed
 number of cues at once. A more important cue cuts a less important one
 short; otherwise it waits for the layer to clear, and it is dropped if it
 would wait longer than `max_wait_ms` (a stale overlay is worse than none).
+
+A verified card that upgrades a template takes the template's slot, so it
+never queues: viewers of its profile see it instead of the template.
 """
 
 from __future__ import annotations
@@ -46,5 +49,19 @@ class Producer:
         feed.append(cue)
         return cue
 
+    def upgrade(self, cue: Cue, old: Cue) -> Cue:
+        """Put `cue` in `old`'s slot for viewers of `cue.profile`."""
+        live = next((c for c in self.schedule[(old.profile, old.lang)] if c.cue_id == old.cue_id), old)
+        cue = cue.model_copy(update={"t_in": live.t_in, "t_out": live.t_out, "start": live.start, "end": live.end,
+                                     "layer": live.layer, "replaces": [*cue.replaces, old.cue_id]})
+        self.schedule[(cue.profile, cue.lang)].append(cue)
+        return cue
+
     def sheet(self, profile: str = "all", lang: str = "en") -> list[Cue]:
         return sorted(self.schedule[(profile, lang)], key=lambda c: c.t_in)
+
+    def visible(self, profile: str = "all", lang: str = "en") -> list[Cue]:
+        """What one viewer gets: the shared feed and their profile's, with upgraded cards swapped in."""
+        feed = self.schedule[("all", lang)] + (self.schedule[(profile, lang)] if profile != "all" else [])
+        gone = {r for c in feed for r in c.replaces}
+        return sorted((c for c in feed if c.cue_id not in gone), key=lambda c: c.t_in)

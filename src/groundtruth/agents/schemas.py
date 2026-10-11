@@ -44,3 +44,10 @@ class Judgement(BaseModel):
 class Rewrite(BaseModel):
     headline: str = Field(description="At most 60 characters")
     body: str = Field(description="One or two short sentences")
+
+
+class PersonaPair(BaseModel):
+    """One writer call per language returns both viewer modes: half the calls, the same wait."""
+
+    analyst: Rewrite
+    casual: Rewrite

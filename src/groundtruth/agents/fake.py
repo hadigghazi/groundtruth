@@ -3,7 +3,9 @@
 It reads the JSON task in the last user message and answers the way each
 agent would, using only numbers from the evidence. `bad_first_draft=True`
 makes the Tactician's first attempt quote a wrong number, so tests can watch
-the Verifier reject it and the retry fix it.
+the code checks reject it and the retry fix it; `judge_rejects_first=True`
+makes the judge turn down the first draft that reaches it, after the writers
+have already started on it.
 """
 
 from __future__ import annotations
@@ -40,7 +42,7 @@ CONSEQUENCE = {
     "unclear": "Watch the next few minutes to see which way it settles.",
 }
 WORD = {"high_turnovers": "high turnovers", "def_action_height_m": "the height of their defending",
-        "line_height_m": "their back line", "block_height_adj_m": "their block",
+        "line_height_m": "their back line", "block_height_adj_m": "their block", "block_height_m": "their block",
         "width_adj_m": "their width in possession", "width_m": "their width in possession",
         "long_pass_share": "their share of long balls", "time_on_ball_s": "their time on the ball",
         "forward_share": "their forward passing", "press_rate": "their pressing", "ppda": "PPDA"}
@@ -70,9 +72,10 @@ def _fmt(key: str, v: float) -> str:
 class _ScriptedClient(BaseChatClient):
     OTEL_PROVIDER_NAME: ClassVar[str] = "GroundTruthScripted"
 
-    def __init__(self, *, bad_first_draft: bool = False, **kwargs: Any) -> None:
+    def __init__(self, *, bad_first_draft: bool = False, judge_rejects_first: bool = False, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.bad_first_draft = bad_first_draft
+        self.judge_rejects_first = judge_rejects_first
         self.calls: list[str] = []
 
     def _inner_get_response(self, *, messages: Sequence[Message], stream: bool = False,
@@ -115,22 +118,23 @@ class _ScriptedClient(BaseChatClient):
         }
 
     def _judge(self, task: dict) -> dict:
+        if self.judge_rejects_first and self.calls.count("judge") == 1:
+            return {"supported": False, "problems": ["the explanation credits the wrong team with the change"]}
         return {"supported": True, "problems": []}
 
     def _persona(self, task: dict) -> dict:
-        ins, lang, mode = task["insight"], task["lang"], task["mode"]
+        ins, lang = task["insight"], task["lang"]
         team = task["team_name"]
-        head = PERSONA[lang].get(ins["cause"], PERSONA[lang]["unclear"]).format(team=team)
+        head = PERSONA[lang].get(ins["cause"], PERSONA[lang]["unclear"]).format(team=team)[:60]
         claims = {c["text"]: c for c in ins.get("claims", [])}
-        if mode == "analyst" and "before" in claims and "after" in claims:
+        analyst = BODY[lang][1]
+        if "before" in claims and "after" in claims:
             key = claims["after"]["metric"]
             what = task.get("metric_word") or WORD.get(key, key)
-            body = BODY[lang][0].format(what=what[:1].upper() + what[1:],
-                                        before=_fmt(key, claims["before"]["value"]),
-                                        after=_fmt(key, claims["after"]["value"]))
-        else:
-            body = BODY[lang][1]
-        return {"headline": head[:60], "body": body}
+            analyst = BODY[lang][0].format(what=what[:1].upper() + what[1:],
+                                           before=_fmt(key, claims["before"]["value"]),
+                                           after=_fmt(key, claims["after"]["value"]))
+        return {"analyst": {"headline": head, "body": analyst}, "casual": {"headline": head, "body": BODY[lang][1]}}
 
 
 class ScriptedChatClient(  # type: ignore[misc]

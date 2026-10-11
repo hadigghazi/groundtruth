@@ -1,7 +1,8 @@
 """One live match: engine -> stats -> cues, paced to the wall clock, fanned out to viewers.
 
 The session runs the five stages in order every tick and never waits on an
-LLM: agents attach through `on_moment` hooks and hand their cues back later.
+LLM: every moment's template card goes on air at once, and agents attach
+through hooks that upgrade those cards later.
 """
 
 from __future__ import annotations
@@ -11,6 +12,8 @@ import math
 import time
 from collections.abc import Awaitable, Callable
 
+from ..agents.guard import summarize
+from ..evaluation.scorecard import scorecard
 from ..league import Club
 from ..render.cues import AGENT_KINDS, CueBuilder
 from ..render.producer import Producer
@@ -19,7 +22,7 @@ from ..schema import Cue, Moment
 from ..sim.engine import MatchEngine
 from ..stats.engine import StatsEngine
 
-MomentHook = Callable[["MatchSession", Moment], Awaitable[None]]
+MomentHook = Callable[["MatchSession", Moment, list[Cue]], Awaitable[None]]
 MAX_FRAMES_PER_SECOND = 25
 
 
@@ -39,6 +42,12 @@ class MatchSession:
         self.started = time.time()
         self.task: asyncio.Task | None = None
         self.last_frame: dict | None = None
+        self.outage = False  # the director can simulate a model outage
+        self.agent_runs: list[dict] = []
+        self.agent_results: dict[str, dict] = {}  # moment_id -> the verified insight's team and cause
+        self.truth_t: list[int] = []  # play time at which each truth-log change took effect
+        self.full_time_card: dict | None = None
+        self._tasks: set[asyncio.Task] = set()
 
     # ------------------------------------------------------------ fan-out
 
@@ -63,6 +72,23 @@ class MatchSession:
             self.publish({"type": "cue", "cue": placed.model_dump(mode="json")})
         return placed
 
+    def upgrade_cue(self, cue: Cue, old: Cue | None) -> Cue | None:
+        """A verified card takes over the template's slot; with no template on air it queues like any cue."""
+        if old is None:
+            return self.place_cue(cue)
+        placed = self.producer.upgrade(cue, old)
+        self.publish({"type": "cue", "cue": placed.model_dump(mode="json")})
+        return placed
+
+    def record_run(self, run: dict) -> None:
+        self.agent_runs.append(run)
+        self.publish({"type": "agent_run", "run": run, "summary": summarize(self.agent_runs)})
+
+    def scorecard(self) -> dict:
+        changes = [{"t": t, "team_id": c.team_id, "label": c.label, "source": c.source,
+                    "period": c.period, "clock_ms": c.clock_ms} for t, c in zip(self.truth_t, self.engine.truth)]
+        return scorecard(changes, self.stats.moments, self.agent_results)
+
     # ------------------------------------------------------------ control
 
     def intervene(self, team_id: str, label: str) -> None:
@@ -83,6 +109,8 @@ class MatchSession:
         ticks = 0
         stride = 1
         for events, frame in self.engine.run():
+            while len(self.truth_t) < len(self.engine.truth):
+                self.truth_t.append(self.stats.t)
             moments = self.stats.feed_frame(frame)
             for ev in events:
                 moments += self.stats.feed_event(ev)
@@ -106,17 +134,20 @@ class MatchSession:
             elif ticks % 50 == 0:
                 await asyncio.sleep(0)
         self.publish({"type": "state", "state": self.stats.snapshot()})
-        self.publish({"type": "full_time", "score": self.engine.score})
+        if self._tasks:  # let the last moments' agents finish before the scorecard is drawn up
+            await asyncio.wait(set(self._tasks), timeout=30)
+        self.full_time_card = self.scorecard()
+        self.publish({"type": "full_time", "score": self.engine.score, "scorecard": self.full_time_card,
+                      "agents": summarize(self.agent_runs)})
 
     def _on_moment(self, m: Moment) -> None:
         self.publish({"type": "moment", "moment": m.model_dump(mode="json")})
+        on_air = [c for c in (self.place_cue(cue) for cue in self.builder.from_moment(m)) if c is not None]
         if self.hooks and m.kind in AGENT_KINDS:
-            # agents own the wording; their hook places the template if they fail or run late
-            for hook in self.hooks:
-                asyncio.get_running_loop().create_task(hook(self, m))
-            return
-        for cue in self.builder.from_moment(m):
-            self.place_cue(cue)
+            for hook in self.hooks:  # the agents upgrade these cards when they have something verified
+                task = asyncio.get_running_loop().create_task(hook(self, m, on_air))
+                self._tasks.add(task)
+                task.add_done_callback(self._tasks.discard)
 
     def start(self) -> asyncio.Task:
         self.task = asyncio.get_running_loop().create_task(self.run())

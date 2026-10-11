@@ -12,6 +12,9 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+# Bump on any change a graphics system would notice; /api/schema/cue serves the JSON Schema.
+SCHEMA_VERSION = "1.1"
+
 EventType = Literal[
     "period_start",
     "period_end",
@@ -164,3 +167,6 @@ class Cue(BaseModel):
     verified: bool = True  # stat cues are computed, so verified by construction
     fallback: bool = False  # True when a template stood in for an agent's text
     path: list[str] = Field(default_factory=list)  # the stages that produced it
+    # Cue ids this one takes over from, for viewers of its profile: a verified card that
+    # upgrades the template card already on air, in the same slot.
+    replaces: list[str] = Field(default_factory=list)

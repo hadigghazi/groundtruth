@@ -79,37 +79,32 @@ class CueBuilder:
         return out
 
     def from_insight(self, m: Moment, insight, written: list, attempts: int) -> list[Cue]:
-        """Cues from the agents' verified insight: one per language and viewer mode.
+        """Cues from the agents' verified insight: one per language and viewer mode that passed.
 
-        Any (language, mode) the writers could not produce falls back to the template
-        for that language, marked as a fallback.
+        A (language, mode) the writers could not produce gets no cue: that viewer keeps
+        the template card already on air.
         """
         secs, priority = 10, 2
         metrics = [CueMetric(key=c.metric or "value", value=c.value, team_id=c.team_id or insight.team_id)
                    for c in insight.claims if c.value is not None]
         out = []
-        templated = {c.lang: c for c in self.from_moment(m)}
         for w in written:
+            path = ["stats", "tactician", "checker", "producer", f"judge+persona_{w.lang}", "gate"]
+            if attempts > 1:
+                path.insert(2, f"retry_x{attempts - 1}")
             for mode, rw in w.texts.items():
+                if rw is None:
+                    continue
                 self._n += 1
-                base = dict(
+                out.append(Cue(
                     cue_id=f"{m.match_id}-c{self._n:05d}", match_id=m.match_id, moment_id=m.moment_id,
                     insight_id=m.moment_id, t_in=m.t, t_out=m.t + secs * 1000,
                     start=CueTime(period=m.period, clock_ms=m.clock_ms),
                     end=CueTime(period=m.period, clock_ms=m.clock_ms + secs * 1000),
-                    layer="stat_panel", priority=priority, profile=mode, lang=w.lang, team_id=insight.team_id,
-                    metrics=metrics, evidence=list(m.evidence), verified=True,
-                )
-                if rw is not None:
-                    path = ["stats", "tactician", "verifier", "producer", f"persona_{w.lang}"]
-                    if attempts > 1:
-                        path.insert(3, "tactician_retry")
-                    out.append(Cue(**base, template="insight", headline=rw.headline, body=rw.body,
-                                   fallback=False, path=path))
-                elif w.lang in templated:
-                    t = templated[w.lang]
-                    out.append(Cue(**base, template="tactical_shift", headline=t.headline, body=t.body,
-                                   fallback=True, path=["stats", "template"]))
+                    layer="stat_panel", template="insight", priority=priority, profile=mode, lang=w.lang,
+                    team_id=insight.team_id, headline=rw.headline, body=rw.body, metrics=metrics,
+                    evidence=list(m.evidence), verified=True, fallback=False, path=path,
+                ))
         return out
 
     def from_moment(self, m: Moment) -> list[Cue]:

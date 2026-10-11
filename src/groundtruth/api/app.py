@@ -15,11 +15,14 @@ from pydantic import BaseModel, Field
 
 from .. import __version__
 from ..league import build_league
+from ..agents.guard import GUARD, summarize
 from ..live.session import MatchSession
+from ..schema import SCHEMA_VERSION, Cue
 from ..sim.tactics import LABELS
 
 LEAGUE = build_league()
 MAX_LIVE = 6
+DELAY_S = float(os.environ.get("GROUNDTRUTH_DELAY_S", "12"))  # the viewer's broadcast delay, in wall seconds
 
 app = FastAPI(title="GroundTruth API", version=__version__)
 sessions: dict[str, MatchSession] = {}
@@ -41,6 +44,10 @@ class Console(BaseModel):
 
 class Speed(BaseModel):
     speed: float = Field(ge=0, le=600)
+
+
+class Outage(BaseModel):
+    on: bool
 
 
 def _session(match_id: str) -> MatchSession:
@@ -114,6 +121,54 @@ def cues(match_id: str, profile: str = "all", lang: str = "en") -> list[dict]:
     return [c.model_dump(mode="json") for c in _session(match_id).producer.sheet(profile, lang)]
 
 
+@app.get("/api/schema/cue")
+def cue_schema() -> dict:
+    """The overlay cue's JSON Schema, versioned, for a graphics system to validate against."""
+    return {"$schema": "https://json-schema.org/draft/2020-12/schema", "$id": f"urn:groundtruth:cue:{SCHEMA_VERSION}",
+            "x-schema-version": SCHEMA_VERSION, **Cue.model_json_schema()}
+
+
+@app.get("/api/matches/{match_id}/overlays")
+def overlays(match_id: str, profile: Literal["all", "analyst", "casual"] = "analyst", lang: str = "en",
+             since_t: int = 0) -> dict:
+    """The overlay timeline one viewer gets: shared cues plus their profile's, upgrades swapped in."""
+    s = _session(match_id)
+    return {"schema_version": SCHEMA_VERSION, "match_id": match_id, "profile": profile, "lang": lang,
+            "t": s.stats.t, "cues": [c.model_dump(mode="json") for c in s.producer.visible(profile, lang)
+                                     if c.t_out >= since_t]}
+
+
+@app.get("/api/matches/{match_id}/scorecard")
+def match_scorecard(match_id: str) -> dict:
+    """What the system said against the answer key. Like the truth log, it opens at full time."""
+    s = _session(match_id)
+    if not s.finished:
+        raise HTTPException(409, "the scorecard opens at full time")
+    return s.full_time_card or s.scorecard()
+
+
+@app.get("/api/matches/{match_id}/agents")
+def match_agents(match_id: str) -> dict:
+    s = _session(match_id)
+    return {"runs": s.agent_runs, "summary": summarize(s.agent_runs), "outage": s.outage, "guard": GUARD.view()}
+
+
+@app.post("/api/matches/{match_id}/agents/outage")
+def set_outage(match_id: str, req: Outage) -> dict:
+    """Simulate the model service going down: every card falls back to its template, live."""
+    s = _session(match_id)
+    s.outage = req.on
+    s.publish({"type": "outage", "on": req.on})
+    return {"ok": True, "outage": s.outage}
+
+
+@app.get("/api/agents")
+def agents_overview() -> dict:
+    """Agent performance across every match on this server."""
+    runs = [r for s in sessions.values() for r in s.agent_runs]
+    return {"summary": summarize(runs), "guard": GUARD.view(), "matches": len(sessions)}
+
+
 @app.get("/api/matches/{match_id}/truth")
 def truth(match_id: str) -> list[dict]:
     """The answer key. Hidden until full time, so nothing downstream can peek."""
@@ -150,9 +205,14 @@ async def stream(ws: WebSocket, match_id: str) -> None:
     await ws.accept()
     q = s.subscribe()
     try:
+        recent = [c for feed in s.producer.schedule.values() for c in feed if c.t_out >= s.stats.t - 120_000]
+        b = getattr(s, "board", None)
+        board = sorted((e for entries in b.items.values() for e in entries), key=lambda e: e["at_ms"]) if b else []
         await ws.send_json({"type": "hello", "meta": s.meta.model_dump(mode="json"), "speed": s.speed,
-                            "state": s.stats.snapshot(), "cues": [c.model_dump(mode="json")
-                                                                  for c in s.producer.sheet("all", "en")[-20:]]})
+                            "delay_s": DELAY_S, "state": s.stats.snapshot(), "outage": s.outage,
+                            "cues": [c.model_dump(mode="json") for c in recent], "board": board[-300:],
+                            "console": s.console_log, "agents": summarize(s.agent_runs),
+                            "full_time": s.full_time_card})
         if s.last_frame:
             await ws.send_json(s.last_frame)
         while True:
@@ -179,7 +239,7 @@ def _attach_agents(s: MatchSession) -> None:
     except ImportError:  # the agents extra is not installed
         return
     try:
-        attach_agents(s, budget_s=float(os.environ.get("GROUNDTRUTH_AGENT_BUDGET_S", "12")))
+        attach_agents(s, budget_s=float(os.environ.get("GROUNDTRUTH_AGENT_BUDGET_S", "20")))
     except Exception:  # a misconfigured model must not stop the match
         logging.getLogger("groundtruth").exception("agents not attached")
 
