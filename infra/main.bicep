@@ -44,6 +44,7 @@ var roles = {
   acrPull: '7f951dda-4ed3-4680-a7ca-43fe172d538d'
   eventHubsDataOwner: 'f526a384-b230-433a-b45c-95f59c4a2dec'
   openAiUser: '5e0bd9bd-7b93-4f28-af87-19fc36ad61bd'
+  speechUser: 'f2dc8367-1007-4938-bd23-fe263f013447'
 }
 
 resource identity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
@@ -183,6 +184,17 @@ resource foundryOpenAi 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   }
 }
 
+// the same account serves neural text to speech for the spoken commentary
+resource foundrySpeech 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(foundry.id, identity.id, roles.speechUser)
+  scope: foundry
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roles.speechUser)
+    principalId: identity.properties.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
 resource foundryUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(aiUserRoleId)) {
   name: guid(foundry.id, identity.id, 'azure-ai-user')
   scope: foundry
@@ -249,7 +261,9 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = if (!empty(appImage)) {
             { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: insights.properties.ConnectionString }
             { name: 'EVENTHUB_FQDN', value: '${eventHubs.name}.servicebus.windows.net' }
             { name: 'EVENTHUB_NAME', value: matchFeed.name }
-            { name: 'GROUNDTRUTH_AGENT_BUDGET_S', value: '12' }
+            { name: 'GROUNDTRUTH_AGENT_BUDGET_S', value: '20' }
+            { name: 'GROUNDTRUTH_SPEECH_REGION', value: location }
+            { name: 'GROUNDTRUTH_SPEECH_RESOURCE_ID', value: foundry.id }
           ]
           probes: [
             { type: 'Liveness', httpGet: { path: '/api/health', port: 8000 }, periodSeconds: 30 }

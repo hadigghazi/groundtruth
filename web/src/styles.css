@@ -188,6 +188,11 @@ button { font: inherit; }
 .gt-stamp { animation: gt-stamp 0.55s var(--gt-ease) both; }
 .gt-stamp path { stroke-dasharray: 20; stroke-dashoffset: 20; animation: gt-draw 0.45s 0.3s var(--gt-ease) forwards; }
 
+.gt-caption { position: absolute; top: 14px; left: 50%; translate: -50% 0; max-width: 46%; padding: 6px 14px 7px; border-radius: 3px;
+  background: rgba(5, 8, 7, 0.8); backdrop-filter: blur(6px); box-shadow: inset 3px 0 0 var(--gt-lime);
+  font: 600 18px/1.15 var(--gt-display); letter-spacing: 0.01em; text-align: center; animation: gt-rise 0.3s var(--gt-ease) both; }
+@container (max-width: 700px) { .gt-caption { top: auto; bottom: 42px; max-width: 86%; font-size: 15px; } }
+@keyframes gt-rise { from { translate: -50% 6px; opacity: 0; } to { translate: -50% 0; opacity: 1; } }
 .gt-ticker { position: absolute; bottom: 0; inset-inline: 0; height: 34px; display: flex; align-items: stretch; background: rgba(5, 8, 7, 0.93);
   border-top: 1px solid var(--gt-line-2); font: 600 17px var(--gt-display); text-transform: uppercase; letter-spacing: 0.03em; }
 .gt-ticker-tag { display: grid; place-items: center; padding: 0 12px; background: var(--gt-lime); color: #0b1000; letter-spacing: 0.16em; font-size: 13px; }
@@ -346,6 +351,6 @@ button { font: inherit; }
   .club-picker { grid-template-columns: repeat(2, 1fr); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .gt-wipe, .gt-stamp, .gt-stamp path, .evidence, .working, .gt-bug-live::before, .live-badge::before, .loading-mark { animation: none !important; }
+  .gt-wipe, .gt-stamp, .gt-stamp path, .evidence, .gt-caption, .working, .gt-bug-live::before, .live-badge::before, .loading-mark { animation: none !important; }
   .gt-stamp path { stroke-dashoffset: 0; }
 }

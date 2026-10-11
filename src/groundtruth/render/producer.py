@@ -15,7 +15,9 @@ from collections import defaultdict
 
 from ..schema import Cue
 
-CAPACITY = {"fullscreen": 1, "lower_third": 1, "stat_panel": 1, "ticker": 1, "player_tag": 2, "pitch_overlay": 1}
+CAPACITY = {"fullscreen": 1, "lower_third": 1, "stat_panel": 1, "ticker": 1, "player_tag": 2, "pitch_overlay": 1,
+            "caption": 1}
+REPLACE_LAYERS = {"caption"}  # the newest line always wins: a running caption never queues
 
 
 class Producer:
@@ -28,7 +30,11 @@ class Producer:
         """Schedule a cue; returns it (possibly moved later) or None if it was dropped."""
         feed = self.schedule[(cue.profile, cue.lang)]
         on_layer = [c for c in feed if c.layer == cue.layer and c.t_out > cue.t_in]
-        if len(on_layer) >= CAPACITY[cue.layer]:
+        if cue.layer in REPLACE_LAYERS:
+            for c in on_layer:
+                c.end = c.end.model_copy(update={"clock_ms": c.end.clock_ms - (c.t_out - cue.t_in)})
+                c.t_out = cue.t_in
+        elif len(on_layer) >= CAPACITY[cue.layer]:
             weaker = [c for c in on_layer if c.priority > cue.priority]
             if weaker:
                 cut = max(weaker, key=lambda c: (c.priority, c.t_in))

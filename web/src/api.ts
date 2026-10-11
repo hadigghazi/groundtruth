@@ -21,7 +21,7 @@ export interface CueMetric { key: string; value: number | string; unit?: string 
 export interface Cue {
   cue_id: string; moment_id?: string | null; insight_id?: string | null; t_in: number; t_out: number;
   start: { period: number; clock_ms: number }; end: { period: number; clock_ms: number };
-  layer: "ticker" | "lower_third" | "player_tag" | "pitch_overlay" | "stat_panel" | "fullscreen";
+  layer: "ticker" | "lower_third" | "player_tag" | "pitch_overlay" | "stat_panel" | "fullscreen" | "caption";
   template: string; priority: number; profile: string; lang: Lang; team_id?: string | null; anchor_player_id?: string | null;
   headline: string; body?: string | null; metrics: CueMetric[]; evidence: string[]; verified: boolean; fallback: boolean; path: string[];
   replaces?: string[];

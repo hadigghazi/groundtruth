@@ -15,6 +15,7 @@ from collections.abc import Awaitable, Callable
 from ..agents.guard import summarize
 from ..evaluation.scorecard import scorecard
 from ..league import Club
+from ..render.captions import CaptionWriter
 from ..render.cues import AGENT_KINDS, CueBuilder
 from ..render.producer import Producer
 from ..render.templates import LANGS
@@ -34,6 +35,7 @@ class MatchSession:
         self.meta = self.engine.meta()
         self.stats = StatsEngine(self.meta)
         self.builder = CueBuilder(self.stats, langs)
+        self.captions = CaptionWriter(self.stats, langs)
         self.producer = Producer()
         self.speed = speed  # 0 = as fast as possible
         self.subscribers: set[asyncio.Queue] = set()
@@ -117,6 +119,8 @@ class MatchSession:
                 moments += self.stats.feed_event(ev)
                 if ev.type in ("goal", "card"):
                     self.key_events.append(ev)
+                for cue in self.captions.from_event(ev):
+                    self.place_cue(cue)
                 self.publish({"type": "event", "event": ev.model_dump(mode="json", exclude_none=True)})
             for m in moments:
                 self._on_moment(m)

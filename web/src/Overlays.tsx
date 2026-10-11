@@ -51,7 +51,7 @@ export function Overlays({ meta, cues, score, period, clockMs, lang, fullTime, s
   const s = strings(lang);
   const by = (layer: Cue["layer"]) =>
     cues.filter((c) => c.layer === layer).sort((a, b) => a.priority - b.priority || b.t_in - a.t_in)[0];
-  const full = by("fullscreen"), lower = by("lower_third"), panel = by("stat_panel"), ticker = by("ticker");
+  const full = by("fullscreen"), lower = by("lower_third"), panel = by("stat_panel"), ticker = by("ticker"), caption = by("caption");
   const h = meta.home, a = meta.away;
   return (
     <div className="gt-overlays" dir={dir(lang)}>
@@ -106,6 +106,10 @@ export function Overlays({ meta, cues, score, period, clockMs, lang, fullTime, s
           ))}
           <span className="gt-panel-why">{s.why}</span>
         </button>
+      )}
+
+      {caption && !full && (
+        <button key={caption.cue_id} className="gt-caption" onClick={() => onOpen(caption)}>{caption.headline}</button>
       )}
 
       {ticker && (

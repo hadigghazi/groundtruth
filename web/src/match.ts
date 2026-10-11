@@ -148,6 +148,7 @@ export class MatchBuffer {
       if (c.lang !== v.lang || t < c.t_in || t >= Math.max(c.t_out, c.t_in + hold)) return false;
       if (c.profile !== "all" && c.profile !== v.mode) return false;
       if (this.upgraded(c, v)) return false;
+      if (c.layer === "caption") return true; // the running caption is for everyone
       if (v.mode === "casual") {
         if (c.priority >= 4 && c.layer !== "player_tag") return false; // a casual viewer gets fewer, bigger overlays
         if (c.layer === "player_tag" && v.player && c.anchor_player_id !== v.player) return false;

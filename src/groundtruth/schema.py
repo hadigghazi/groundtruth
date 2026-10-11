@@ -13,7 +13,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 # Bump on any change a graphics system would notice; /api/schema/cue serves the JSON Schema.
-SCHEMA_VERSION = "1.1"
+SCHEMA_VERSION = "1.2"
 
 EventType = Literal[
     "period_start",
@@ -135,7 +135,7 @@ class CueMetric(BaseModel):
     before: float | None = None
 
 
-Layer = Literal["ticker", "lower_third", "player_tag", "pitch_overlay", "stat_panel", "fullscreen"]
+Layer = Literal["ticker", "lower_third", "player_tag", "pitch_overlay", "stat_panel", "fullscreen", "caption"]
 
 
 class Cue(BaseModel):

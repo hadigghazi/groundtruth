@@ -3,7 +3,7 @@ import {
 } from "@fluentui/react-components";
 import {
   Bot20Regular, Cube20Regular, DataBarVertical20Regular, Gauge20Regular, Grid20Regular, Map20Regular,
-  Settings20Regular, SplitVertical20Regular, Square20Regular, Trophy20Regular,
+  Settings20Regular, Speaker220Regular, SpeakerMute20Regular, SplitVertical20Regular, Square20Regular, Trophy20Regular,
 } from "@fluentui/react-icons";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { api, openStream } from "./api";
@@ -23,6 +23,7 @@ import { StatsPanel } from "./panels/Stats";
 import { BroadcastView, type Tag } from "./views/BroadcastView";
 import { TacticalView } from "./views/TacticalView";
 import { gtTheme } from "./theme";
+import { useVoice } from "./voice";
 
 /** Fluent flips its controls for right-to-left only under a provider that says so. */
 function Local({ lang, className, children }: { lang: Lang; className: string; children: React.ReactNode }) {
@@ -44,9 +45,11 @@ function ViewerColumn({ buf, viewer, setViewer, view, getT, slowT, compact, seek
   const meta = buf.meta!;
   const s = strings(viewer.lang);
   const [open, setOpen] = useState<Cue | null>(null);
+  const [voice, setVoice] = useState(false);
   const tags = useRef<Tag[]>([]);
   const getFrame = useCallback((): Frame | null => buf.frameAt(getT()), [buf, getT]);
   const cues = buf.activeCues(slowT, viewer);
+  useVoice(cues, viewer.lang, viewer.mode, voice);
   tags.current = cues.filter((c) => c.layer === "player_tag" && c.anchor_player_id)
     .map((c) => ({ player_id: c.anchor_player_id!, headline: c.headline, body: c.body }));
   const everyone = [...meta.home.lineup, ...meta.home.bench, ...meta.away.lineup, ...meta.away.bench];
@@ -80,6 +83,10 @@ function ViewerColumn({ buf, viewer, setViewer, view, getT, slowT, compact, seek
           <Option value={meta.home.team_id}>{meta.home.short_name}</Option>
           <Option value={meta.away.team_id}>{meta.away.short_name}</Option>
         </Dropdown>
+        <Tooltip content={s.voice} relationship="label">
+          <ToggleButton size="small" appearance="subtle" checked={voice} onClick={() => setVoice(!voice)}
+            icon={voice ? <Speaker220Regular /> : <SpeakerMute20Regular />} />
+        </Tooltip>
         {!compact && (
           <Dropdown className="vb-dd" size="small" appearance="filled-darker" aria-label={s.player}
             value={`${s.player}: ${playerName(viewer.player)}`} selectedOptions={[viewer.player ?? ""]}

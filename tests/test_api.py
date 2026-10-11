@@ -50,7 +50,7 @@ def test_truth_stays_hidden_until_full_time():
 def test_cue_schema_is_versioned_and_stable():
     with TestClient(app) as client:
         schema = client.get("/api/schema/cue").json()
-    assert schema["x-schema-version"] == "1.1"
+    assert schema["x-schema-version"] == "1.2"
     # A graphics system depends on these; change them only with a version bump.
     assert set(schema["properties"]) == {
         "cue_id", "match_id", "moment_id", "insight_id", "t_in", "t_out", "start", "end", "layer", "template",
@@ -62,7 +62,7 @@ def test_overlays_scorecard_and_agent_metrics():
     with TestClient(app) as client:
         mid = client.post("/api/matches", json={"home": "HLB", "away": "STM", "seed": 6, "speed": 1}).json()["match_id"]
         tl = client.get(f"/api/matches/{mid}/overlays", params={"profile": "casual", "lang": "es"}).json()
-        assert tl["schema_version"] == "1.1" and tl["profile"] == "casual" and isinstance(tl["cues"], list)
+        assert tl["schema_version"] == "1.2" and tl["profile"] == "casual" and isinstance(tl["cues"], list)
         assert client.get(f"/api/matches/{mid}/scorecard").status_code == 409
         agents = client.get(f"/api/matches/{mid}/agents").json()
         assert agents["outage"] is False and "summary" in agents

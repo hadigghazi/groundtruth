@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, Response, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -19,12 +19,14 @@ from ..agents.guard import GUARD, summarize
 from ..live.session import MatchSession
 from ..schema import SCHEMA_VERSION, Cue
 from ..sim.tactics import LABELS
+from .speech import Speech
 
 LEAGUE = build_league()
 MAX_LIVE = 6
 DELAY_S = float(os.environ.get("GROUNDTRUTH_DELAY_S", "12"))  # the viewer's broadcast delay, in wall seconds
 
 app = FastAPI(title="GroundTruth API", version=__version__)
+speech = Speech.from_env()
 sessions: dict[str, MatchSession] = {}
 _ids = itertools.count(1)
 
@@ -59,7 +61,24 @@ def _session(match_id: str) -> MatchSession:
 
 @app.get("/api/health")
 def health() -> dict:
-    return {"ok": True, "version": __version__, "live": sum(not s.finished for s in sessions.values())}
+    return {"ok": True, "version": __version__, "live": sum(not s.finished for s in sessions.values()),
+            "tts": speech is not None}
+
+
+@app.get("/api/tts")
+async def tts(text: str = Query(min_length=1, max_length=400), lang: Literal["en", "es", "ar"] = "en",
+              mode: Literal["analyst", "casual"] = "analyst") -> Response:
+    """Spoken commentary from Azure AI Speech neural voices; 404 when Speech is not configured."""
+    if speech is None:
+        raise HTTPException(404, "text to speech is not configured")
+    if not speech.allow(len(text)):
+        raise HTTPException(429, "the spoken-commentary budget for this hour is spent")
+    try:
+        audio = await speech.synthesize(text, lang, mode)
+    except Exception as e:
+        logging.getLogger("groundtruth").warning("tts failed: %s", e)
+        raise HTTPException(502, "text to speech failed") from e
+    return Response(audio, media_type="audio/mpeg", headers={"Cache-Control": "public, max-age=86400"})
 
 
 @app.get("/api/league")
