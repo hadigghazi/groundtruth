@@ -101,6 +101,11 @@ All numbers come from simulated matches with seeds disjoint from anything used t
 | Pass model | held-out log loss 0.358 (base rate 0.475), well calibrated | 16 training, 4 test matches (`groundtruth fit-models`) |
 | xG model | held-out log loss 0.273 (base rate 0.341) | same |
 | Tactical shifts caught with the right cause (detector rule) | 65% of 34 hidden changes within 12 min (median 9.3 min); 2.5 false alarms per match | 8 noise, 12 selection, 12 test matches (`groundtruth detector-report`) |
+| Tactical shifts caught with the right cause (learned detector, in use) | 68% of the same 34 changes (median 9.0 min); 1.9 false alarms per match | softmax over own and opponent drifts; 150 training, 30 noise, the same selection and test matches (`groundtruth learn-detector`, `docs/learned-detector-report.json`) |
+| Players found in rendered broadcast video | precision 0.94, recall 0.95, median 0.12 m on the pitch, side right 94% | keypoint detector trained on 2,851 frames from 3 matches, graded on 10 Hz clips from 2 others (`groundtruth vision`, `docs/vision-report.json`) |
+| Ball found in video | precision 0.93, recall 0.86, median 0.36 m | same |
+| Speeds from video | players within 0.9 km/h, ball within 7.7 km/h (mean error) | tracks on the pitch against the engine's positions |
+| Passes from video | precision 0.41, recall 0.66 against passes the picture shows | tracking switches still read as changes of possession |
 | Completed passes rebuilt from positions alone | precision 0.86, recall 0.78 (1,133 of 1,459) | `groundtruth autoevent --seeds 7 8` |
 | Shots rebuilt from positions alone | precision 1.00, recall 0.49 (blocked shots look like interceptions) | same |
 | Agents' cause against the rule, latency, cost | run with a real model: `groundtruth eval-agents --llm foundry` | the detector's 12 test matches, paced live |
@@ -183,6 +188,10 @@ Command line: `groundtruth simulate`, `batch`, `calibrate`, `fit-models`, `detec
   "space at the end" feature partly reflects the outcome, as in real event data.
 * From positions alone, blocked shots are indistinguishable from interceptions, so shot recall
   from tracking is about half.
+* The video is rendered by the project itself: cleaner than a real broadcast (no replays, cuts or
+  crowds of players at a corner). The detector runs at 11 ms a frame on one CPU core.
+* The learned detector's gain over the rule is within noise on 34 test changes; it is better on
+  all three measures and gives the agents calibrated probabilities, so it is the one in use.
 * A live match lives in one server process, so the app runs as a single replica.
 
 ## Licence

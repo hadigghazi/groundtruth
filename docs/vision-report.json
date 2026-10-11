@@ -1,0 +1,62 @@
+{
+  "players": {
+    "precision": 0.94,
+    "recall": 0.947,
+    "median_error_m": 0.12,
+    "team_accuracy": 0.939
+  },
+  "ball": {
+    "precision": 0.928,
+    "recall": 0.861,
+    "median_error_m": 0.36
+  },
+  "player_speed_mae_kmh": 0.91,
+  "ball_speed_mae_kmh": 7.68,
+  "passes": {
+    "in_view": 59,
+    "found": 96,
+    "matched": 39,
+    "precision": 0.406,
+    "recall": 0.661
+  },
+  "detector_ms_per_frame": 11.3,
+  "train_frames": 2851,
+  "train_seeds": [
+    2001,
+    2002,
+    2003
+  ],
+  "test_seeds": [
+    2101,
+    2102
+  ],
+  "epochs": 18,
+  "loss_by_epoch": [
+    2.2425,
+    0.8949,
+    0.6323,
+    0.4981,
+    0.3901,
+    0.3227,
+    0.2781,
+    0.3085,
+    0.2366,
+    0.2207,
+    0.2374,
+    0.1935,
+    0.1797,
+    0.164,
+    0.1527,
+    0.1411,
+    0.1381,
+    0.1338
+  ],
+  "seconds": {
+    "data": 189,
+    "train": 1256
+  },
+  "frame": [
+    320,
+    180
+  ]
+}
