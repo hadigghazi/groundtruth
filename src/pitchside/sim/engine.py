@@ -68,6 +68,7 @@ class Flight:
     under_pressure: bool = False
     restart: str | None = None
     header: bool = False
+    cut_gap: float = 99.0  # the winning defender's distance from the passing lane at the kick
 
 
 @dataclass
@@ -334,6 +335,22 @@ class MatchEngine:
             u = np.where(gk, u, np.minimum(u, self._offside_line(t, bu)))
         return idx, pitch.from_team(np.stack([u, v], axis=1), d)
 
+    def _zonal(self, tgt: np.ndarray, o: int) -> None:
+        """Defenders lean from their zone towards a goal-side spot on the nearest attacker."""
+        D = self._members(o, outfield=True)
+        A = np.array([i for i in self._members(1 - o, outfield=True) if i != self.owner])
+        if len(D) == 0 or len(A) == 0:
+            return
+        goal = pitch.from_team(np.array([0.0, W / 2]), self.dir[o])
+        gap = np.linalg.norm(tgt[D][:, None, :] - self.pos[A][None, :, :], axis=2)
+        near = gap.argmin(axis=1)
+        dmin = gap[np.arange(len(D)), near]
+        att = self.pos[A][near]
+        to_goal = goal - att
+        spot = att + to_goal / np.maximum(np.linalg.norm(to_goal, axis=1), 1e-6)[:, None] * 2.0
+        w = np.where(dmin < 12.0, 0.5, 0.0)[:, None]
+        tgt[D] = (1.0 - w) * tgt[D] + w * spot
+
     def _kickoff_targets(self, kicking: int) -> np.ndarray:
         tgt = np.zeros((self.N, 2))
         for t in (0, 1):
@@ -371,12 +388,14 @@ class MatchEngine:
                 tgt[idx] = xy
             if self.state == "dead" and self.dead.kind == "corner":
                 self._corner_shape(tgt, self.dead.team, self.dead.taker)
+            elif self.state != "dead":
+                self._zonal(tgt, 1 - self.possession_team)
         # slow wandering, so nobody stands still
-        tau, sigma = 5.0, 1.5
+        tau, sigma = 5.0, 1.0
         self.noise += -self.noise * DT / tau + sigma * math.sqrt(2 * DT / tau) * self.rng.normal(size=self.noise.shape)
         tgt += self.noise
         dist = np.linalg.norm(tgt - self.pos, axis=1)
-        cap = np.minimum(self.top_speed * 0.8 * self._fatigue(slice(None)), 1.2 + 0.25 * dist)
+        cap = np.minimum(self.top_speed * 0.8 * self._fatigue(slice(None)), 1.0 + 0.2 * dist)
         for i, (p, s) in ov.orders.items():
             tgt[i], cap[i] = p, s
         delta = tgt - self.pos
@@ -539,7 +558,7 @@ class MatchEngine:
                 self._emit("pressure", team_id=self.team_ids[o], player_id=self.pid[j], **self._xy(self.pos[j]))
         for j, dj in zip(opp, d_opp):
             if dj < 1.8 and now >= self.beaten_until[j]:
-                rate = 0.5 + 1.2 * self.tactics[o].press_intensity  # challenges per second at close range
+                rate = 0.35 + 0.8 * self.tactics[o].press_intensity  # challenges per second at close range
                 if self.rng.random() < rate * DT and self._tackle(int(j), c, now):
                     return
         if now >= self.next_decision_ms:
@@ -614,7 +633,7 @@ class MatchEngine:
         """A tackle attempt by j on the carrier c. True when play changes hands or stops."""
         o = int(self.team[j])
         loc = self.pos[c].copy()
-        if self.rng.random() < 0.16 + 0.10 * self.tactics[o].press_intensity:
+        if self.rng.random() < 0.12 + 0.08 * self.tactics[o].press_intensity:
             self._foul(j, c, now, loc)
             return True
         p_win = float(np.clip(0.45 + 0.35 * (self.tackling[j] - self.dribbling[c]), 0.2, 0.75))
@@ -659,7 +678,7 @@ class MatchEngine:
 
     def _decision_delay(self, c: int, pressured: bool) -> int:
         tempo = self.tactics[self.team[c]].tempo
-        s = self.rng.uniform(0.6, 1.8) * (1.25 - 0.5 * tempo) * (0.6 if pressured else 1.0)
+        s = self.rng.uniform(0.8, 2.4) * (1.25 - 0.5 * tempo) * (0.6 if pressured else 1.0)
         return int(s * 1000)
 
     def _decide(self, c: int, now: int, pressured: bool) -> None:
@@ -748,6 +767,7 @@ class MatchEngine:
         r = int(opts["idx"][k])
         R = opts["R"][k].copy()
         high = bool(opts["high"][k])
+        cut_gap = 99.0
         if self.rng.random() < opts["p"][k]:
             outcome, winner, end = "complete", r, R
         else:
@@ -756,12 +776,14 @@ class MatchEngine:
             len2 = max(float(seg @ seg), 1e-6)
             tt = np.clip(((self.pos[opp] - P) @ seg) / len2, 0.35, 1.0)
             closest = P + tt[:, None] * seg
-            j = int(np.argmin(np.linalg.norm(self.pos[opp] - closest, axis=1)))
+            gaps = np.linalg.norm(self.pos[opp] - closest, axis=1)
+            j = int(np.argmin(gaps))
             if self.rng.random() < (0.22 if high else 0.08):
                 outcome, winner = "out", None
                 end, _ = pitch.exit_point(P, seg / math.sqrt(len2))
             else:
                 outcome, winner, end = "incomplete", int(opp[j]), closest[j]
+                cut_gap = float(gaps[j])
         dist = float(np.linalg.norm(end - P))
         speed = min(12.0 + 0.2 * dist, 25.0) if high else min(9.0 + 0.25 * dist, 22.0)
         steps = max(int(round(dist / speed / DT)), 2)
@@ -770,6 +792,7 @@ class MatchEngine:
             z_peak=min(2.0 + 0.12 * dist, 12.0) if high else 0.0, actor=c, team=t, outcome=outcome,
             possession_id=self.possession_id, receiver=r, winner=winner,
             height="high" if high else "ground", under_pressure=pressured, restart=self.restart_kind,
+            cut_gap=cut_gap,
         )
         self.state, self.owner, self.restart_kind = "flight", None, None
 
@@ -867,9 +890,9 @@ class MatchEngine:
                 if self.header_ready:
                     self.next_decision_ms = now + 100
             elif f.outcome == "incomplete":
-                # A clean cut-out is an interception; a loose ball picked up later is a recovery.
-                gap = float(np.linalg.norm(self.pos[f.winner] - f.end))
-                kind = "interception" if gap < 1.5 else "recovery"
+                # A defender already in the lane cuts it out (interception); otherwise the
+                # ball runs loose and is picked up (recovery).
+                kind = "interception" if f.cut_gap < 1.2 else "recovery"
                 self._emit(kind, team_id=self.team_ids[self.team[f.winner]],
                            player_id=self.pid[f.winner], **self._xy(f.end), related=[ev.event_id])
                 self._give_ball(f.winner, now, kind)
