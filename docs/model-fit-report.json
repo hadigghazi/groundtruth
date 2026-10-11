@@ -1,0 +1,119 @@
+{
+  "pass": {
+    "train_n": 15490,
+    "test_n": 3775,
+    "test_rate": 0.8177,
+    "test_log_loss": 0.358,
+    "test_log_loss_base_rate": 0.4748,
+    "calibration": [
+      {
+        "predicted": 0.402,
+        "observed": 0.383,
+        "n": 472
+      },
+      {
+        "predicted": 0.67,
+        "observed": 0.689,
+        "n": 472
+      },
+      {
+        "predicted": 0.784,
+        "observed": 0.788,
+        "n": 472
+      },
+      {
+        "predicted": 0.86,
+        "observed": 0.858,
+        "n": 472
+      },
+      {
+        "predicted": 0.914,
+        "observed": 0.926,
+        "n": 472
+      },
+      {
+        "predicted": 0.951,
+        "observed": 0.922,
+        "n": 472
+      },
+      {
+        "predicted": 0.974,
+        "observed": 0.987,
+        "n": 472
+      },
+      {
+        "predicted": 0.985,
+        "observed": 0.989,
+        "n": 472
+      }
+    ],
+    "coef": {
+      "intercept": 2.017,
+      "dist": 1.354,
+      "dist_sq": -2.213,
+      "forward": 0.139,
+      "lane_gap": -0.471,
+      "end_space": 1.407,
+      "under_pressure": -0.227,
+      "high": -0.586
+    }
+  },
+  "shot": {
+    "train_n": 504,
+    "test_n": 140,
+    "test_rate": 0.1071,
+    "test_log_loss": 0.2734,
+    "test_log_loss_base_rate": 0.3405,
+    "calibration": [
+      {
+        "predicted": 0.009,
+        "observed": 0.0,
+        "n": 18
+      },
+      {
+        "predicted": 0.018,
+        "observed": 0.0,
+        "n": 17
+      },
+      {
+        "predicted": 0.025,
+        "observed": 0.056,
+        "n": 18
+      },
+      {
+        "predicted": 0.038,
+        "observed": 0.059,
+        "n": 17
+      },
+      {
+        "predicted": 0.062,
+        "observed": 0.0,
+        "n": 17
+      },
+      {
+        "predicted": 0.101,
+        "observed": 0.167,
+        "n": 18
+      },
+      {
+        "predicted": 0.183,
+        "observed": 0.176,
+        "n": 17
+      },
+      {
+        "predicted": 0.303,
+        "observed": 0.389,
+        "n": 18
+      }
+    ],
+    "coef": {
+      "intercept": -2.698,
+      "goal_dist": -1.036,
+      "goal_angle": 0.09,
+      "header": -0.493,
+      "under_pressure": -0.071,
+      "blockers": -0.112,
+      "free_kick": -0.23
+    }
+  }
+}
