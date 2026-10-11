@@ -46,7 +46,7 @@ def true_goal_prob(u: float, v: float, pressured: bool, finishing: float, header
     most of the goal, so `keeper_gap` (metres) scales the chance down.
     """
     dist = math.hypot(L - u, W / 2 - v)
-    z = -1.1 - 0.125 * dist + 1.0 * pitch.goal_angle(u, v) - 0.4 * pressured + 1.0 * (finishing - 0.5)
+    z = -1.4 - 0.125 * dist + 1.0 * pitch.goal_angle(u, v) - 0.4 * pressured + 1.0 * (finishing - 0.5)
     q = float(_sigmoid(z - (0.7 if header else 0.0)))
     return q * float(np.clip(0.35 + 0.1 * keeper_gap, 0.35, 1.0))
 
@@ -408,11 +408,11 @@ class MatchEngine:
             elif self.state != "dead":
                 self._zonal(tgt, 1 - self.possession_team)
         # slow wandering, so nobody stands still
-        tau, sigma = 5.0, 1.0
+        tau, sigma = 5.0, 0.8
         self.noise += -self.noise * DT / tau + sigma * math.sqrt(2 * DT / tau) * self.rng.normal(size=self.noise.shape)
         tgt += self.noise
         dist = np.linalg.norm(tgt - self.pos, axis=1)
-        cap = np.minimum(self.top_speed * 0.8 * self._fatigue(slice(None)), 0.8 + 0.18 * dist)
+        cap = np.minimum(self.top_speed * 0.8 * self._fatigue(slice(None)), 0.7 + 0.15 * dist)
         for i, (p, s) in ov.orders.items():
             tgt[i], cap[i] = p, s
         delta = tgt - self.pos
@@ -680,11 +680,11 @@ class MatchEngine:
             self.yellow[j] = True
             self._emit("card", team_id=self.team_ids[o], player_id=self.pid[j], card="yellow", **self._xy(loc))
         u, v = pitch.to_team(loc, self.dir[t])
-        if pitch.in_box(u, v) and self.rng.random() < 0.15:
+        if pitch.in_box(u, v) and self.rng.random() < 0.1:
             spot = pitch.from_team(np.array([L - 11.0, W / 2]), self.dir[t])
             self._set_dead("penalty", t, spot, self.rng.uniform(40, 70))
         else:
-            self._set_dead("free_kick", t, loc, self.rng.uniform(12, 28))
+            self._set_dead("free_kick", t, loc, self.rng.uniform(25, 45))
 
     def _nearest_opponent(self, c: int) -> float:
         opp = self._members(1 - int(self.team[c]))
@@ -721,7 +721,7 @@ class MatchEngine:
                     p_shoot = 0.6
                 else:
                     blockers = len(self._defenders_in_cone(c))
-                    base = 0.02 if dg < 25.0 else 0.008
+                    base = 0.045 if 14.0 < dg < 25.0 else (0.02 if dg <= 14.0 else 0.008)
                     p_shoot = float(np.clip(base + 0.45 * q, 0.0, 0.3)) * (0.6 if blockers >= 2 else 1.0)
                     if pitch.in_box(u, v) and self._nearest_opponent(c) < 2.0:
                         p_shoot *= 0.6  # a tight marker in the box
@@ -948,10 +948,10 @@ class MatchEngine:
             if self.rng.random() < 0.7:
                 self._give_ball(f.winner, now, "save")
             else:
-                self._set_dead("corner", f.team, self._corner_spot(f.team, f.end), self.rng.uniform(18, 35))
+                self._set_dead("corner", f.team, self._corner_spot(f.team, f.end), self.rng.uniform(25, 45))
         elif f.outcome == "blocked":
             if self.rng.random() < 0.3:
-                self._set_dead("corner", f.team, self._corner_spot(f.team, f.end), self.rng.uniform(18, 35))
+                self._set_dead("corner", f.team, self._corner_spot(f.team, f.end), self.rng.uniform(25, 45))
             else:
                 self._give_ball(f.winner, now, "block")
         else:
@@ -968,17 +968,17 @@ class MatchEngine:
         x, y = float(point[0]), float(point[1])
         if 0.05 < x < L - 0.05:  # crossed a touchline
             self._set_dead("throw_in", other, (float(np.clip(x, 0.5, L - 0.5)), 0.0 if y < W / 2 else W),
-                           self.rng.uniform(7, 15))
+                           self.rng.uniform(10, 20))
             return
         # The goal line at this end belongs to whichever team defends it.
         high_end = x > L / 2
         defender = 0 if (self.dir[0] == -1) == high_end else 1
         if last_team == defender:
             self._set_dead("corner", other, np.array([L if high_end else 0.0, 0.0 if y < W / 2 else W]),
-                           self.rng.uniform(18, 35))
+                           self.rng.uniform(25, 45))
         else:
             spot = pitch.from_team(np.array([5.5, W / 2]), self.dir[defender])
-            self._set_dead("goal_kick", defender, spot, self.rng.uniform(14, 25))
+            self._set_dead("goal_kick", defender, spot, self.rng.uniform(20, 35))
 
     # ---------------------------------------------------------- periods
 
