@@ -59,9 +59,24 @@ def main(argv: list[str] | None = None) -> None:
     f.add_argument("--workers", type=int, default=4)
     f.add_argument("--write", type=Path, default=None, help="write coefficients JSON here")
 
+    dr = sub.add_parser("detector-report", help="score the tactical-shift detector against the truth log")
+    dr.add_argument("--noise-seeds", type=int, nargs="*", default=list(range(200, 208)))
+    dr.add_argument("--eval-seeds", type=int, nargs="*", default=list(range(300, 312)))
+    dr.add_argument("--workers", type=int, default=4)
+
     sub.add_parser("league", help="print the fictional league")
     args = ap.parse_args(argv)
     league = build_league()
+
+    if args.cmd == "detector-report":
+        from .evaluation.detector import effect_and_detection, noise_profile
+        out = {}
+        if args.noise_seeds:
+            out["noise"] = noise_profile(args.noise_seeds, workers=args.workers)
+        if args.eval_seeds:
+            out["detection"] = effect_and_detection(args.eval_seeds, workers=args.workers)
+        print(json.dumps(out, indent=2))
+        return
 
     if args.cmd == "fit-models":
         from .stats.fit import fit_models

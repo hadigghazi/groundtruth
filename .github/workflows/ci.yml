@@ -13,6 +13,10 @@ on:
       seeds:
         description: "Seeds for the calibration run"
         default: "7 8 9 10"
+      detector:
+        description: "Score the tactical-shift detector against the truth log"
+        type: boolean
+        default: false
 
 jobs:
   test:
@@ -58,3 +62,20 @@ jobs:
           path: |
             coefficients.json
             fit-report.json
+
+  detector:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.detector == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e .
+      - run: pitchside detector-report --workers 4 | tee detector-report.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: detector
+          path: detector-report.json
