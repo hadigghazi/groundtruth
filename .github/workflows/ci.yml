@@ -28,7 +28,7 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-      - run: pip install -e ".[test]"
+      - run: pip install -e ".[test,api]"
       - run: pytest -q --durations=5
 
   calibrate:

@@ -117,3 +117,50 @@ class Moment(BaseModel):
     headline: str  # a plain English template line; agents rewrite it
     metrics: dict = Field(default_factory=dict)
     evidence: list[str] = Field(default_factory=list)  # event ids
+
+
+class CueTime(BaseModel):
+    period: int
+    clock_ms: int
+
+
+class CueMetric(BaseModel):
+    key: str
+    value: float | int | str
+    unit: str | None = None
+    team_id: str | None = None
+    before: float | None = None
+
+
+Layer = Literal["ticker", "lower_third", "player_tag", "pitch_overlay", "stat_panel", "fullscreen"]
+
+
+class Cue(BaseModel):
+    """One timed overlay. A graphics system can render it with nothing else to hand.
+
+    `t_in`/`t_out` are monotonic play time (ms) for syncing a player; `start`/`end`
+    are the match clock a broadcast graphics operator reads.
+    """
+
+    cue_id: str
+    match_id: str
+    moment_id: str | None = None
+    insight_id: str | None = None
+    t_in: int
+    t_out: int
+    start: CueTime
+    end: CueTime
+    layer: Layer
+    template: str
+    priority: int  # 1 is most important
+    profile: str  # "all" for stat cues, else a profile name
+    lang: str
+    team_id: str | None = None
+    anchor_player_id: str | None = None  # a player tag follows this player on screen
+    headline: str
+    body: str | None = None
+    metrics: list[CueMetric] = Field(default_factory=list)
+    evidence: list[str] = Field(default_factory=list)  # event ids behind every number
+    verified: bool = True  # stat cues are computed, so verified by construction
+    fallback: bool = False  # True when a template stood in for an agent's text
+    path: list[str] = Field(default_factory=list)  # the stages that produced it

@@ -72,9 +72,9 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.cmd == "detector-report":
         from .evaluation.detector import choose, detection, effect_profile, noise_profile
-        noise = noise_profile(args.noise_seeds, workers=args.workers)
+        noise, vectors = noise_profile(args.noise_seeds, workers=args.workers)
         effects = effect_profile(args.select_seeds, workers=args.workers)
-        config = choose(noise, effects)
+        config = choose(noise, vectors, effects)
         config["seeds"] = {"noise": args.noise_seeds, "select": args.select_seeds, "test": args.test_seeds}
         if args.write:
             args.write.write_text(json.dumps(config, indent=2), encoding="utf-8")

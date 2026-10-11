@@ -114,23 +114,27 @@ DEFAULT_THRESHOLDS = {"press_rate": 0.15, "block_height_m": 4.0, "width_m": 3.0,
                       "long_pass_share": 0.08, "time_on_ball_s": 0.5}
 
 
-def load_detector_config() -> tuple[dict[str, float], dict[str, str]]:
-    """Thresholds per watched signal, and the rule that maps a signal moving one way to a cause."""
+def load_detector_config() -> dict:
+    """The detector settings chosen by `pitchside detector-report` (see evaluation/detector.py)."""
     try:
-        raw = json.loads(resources.files("pitchside.stats").joinpath("detector.json").read_text(encoding="utf-8"))
+        return json.loads(resources.files("pitchside.stats").joinpath("detector.json").read_text(encoding="utf-8"))
     except FileNotFoundError:
-        return dict(DEFAULT_THRESHOLDS), {}
-    return dict(raw["thresholds"]), dict(raw.get("cause_map", {}))
+        return {"thresholds": dict(DEFAULT_THRESHOLDS)}
 
 
 class StatsEngine:
     def __init__(self, meta: MatchMeta, models: dict[str, Logistic] | None = None,
-                 thresholds: dict[str, float] | None = None):
+                 thresholds: dict[str, float] | None = None, detector: dict | None = None):
         self.meta = meta
         self.match_id = meta.match_id
         self.models = models or load_models()
-        config_thresholds, self.cause_map = load_detector_config()
-        self.thresholds = thresholds or config_thresholds
+        cfg = detector or load_detector_config()
+        self.cause_map: dict[str, str] = dict(cfg.get("cause_map", {}))
+        # cause mode: a score per cause from the standardized moves of its signals
+        self.causes = {c: [tuple(s[:2]) for s in sigs] for c, sigs in cfg.get("causes", {}).items()}
+        self.signal_sd: dict[str, float] = dict(cfg.get("sd", {}))
+        self.score_thresholds: dict[str, float] = dict(cfg.get("score_thresholds", {}))
+        self.thresholds = thresholds or dict(cfg.get("thresholds", {}))
         self.team_ids = (meta.home.team_id, meta.away.team_id)
         self.direction = {int(p): d for p, d in meta.direction.items()}
         self.people = {p.player_id: (team.team_id, p) for team in (meta.home, meta.away) for p in team.lineup + team.bench}
@@ -542,6 +546,9 @@ class StatsEngine:
         if now < RECENT + BASELINE:
             return
         base = self.window_metrics(now - RECENT - BASELINE, now - RECENT)
+        if self.causes:
+            self._detect_causes(base, cur)
+            return
         for tid in self.team_ids:
             for key, threshold in self.thresholds.items():  # only the signals the config selects
                 a, b = base[tid].get(key), cur[tid].get(key)
@@ -563,7 +570,44 @@ class StatsEngine:
                 self._pending_shift.pop(k, None)
                 self._shift_moment(tid, key, a, b, base, cur)
 
-    def _shift_moment(self, tid: str, key: str, a: float, b: float, base: dict, cur: dict) -> None:
+    def _score(self, cause: str, tid: str, base: dict, cur: dict) -> tuple[float, list] | None:
+        """A cause's score: the sum of its signals' standardized moves (in its expected direction) / sqrt(n)."""
+        parts = []
+        for s, d in self.causes[cause]:
+            a, b = base[tid].get(s), cur[tid].get(s)
+            sd = self.signal_sd.get(s)
+            if a is None or b is None or not sd:
+                continue
+            parts.append(((1.0 if d == "up" else -1.0) * (b - a) / sd, s, a, b))
+        if not parts:
+            return None
+        return sum(p[0] for p in parts) / math.sqrt(len(parts)), parts
+
+    def _detect_causes(self, base: dict, cur: dict) -> None:
+        now = self.t
+        for tid in self.team_ids:
+            for cause in self.causes:
+                scored = self._score(cause, tid, base, cur)
+                k = (tid, cause)
+                if scored is None or scored[0] < self.score_thresholds.get(cause, 3.0):
+                    self._pending_shift.pop(k, None)
+                    continue
+                # must hold for two consecutive checks, and not repeat within 10 minutes
+                if self._pending_shift.get(k) is None:
+                    self._pending_shift[k] = now
+                    continue
+                if now - self._last_shift.get(k, -10**9) < 10 * MINUTE:
+                    continue
+                self._last_shift[k] = now
+                self._pending_shift.pop(k, None)
+                score, parts = scored
+                _, s, a, b = max(parts)
+                self._shift_moment(tid, s, a, b, base, cur, cause=cause, score=score,
+                                   contributions={p[1]: round(p[0], 2) for p in parts})
+
+    def _shift_moment(self, tid: str, key: str, a: float, b: float, base: dict, cur: dict,
+                      cause: str | None = None, score: float | None = None,
+                      contributions: dict | None = None) -> None:
         now = self.t
         signals = {}
         for t in self.team_ids:
@@ -578,7 +622,9 @@ class StatsEngine:
         self._moment("tactical_shift", 0.8, f"{self.team_name(tid)}: {key.replace('_', ' ')} {direction}",
                      team_id=tid, evidence=ev[-10:],
                      metrics={"signal": key, "direction": direction, "before": a, "after": b,
-                              "rule_cause": self.cause_map.get(f"{key}|{direction}"),
+                              "rule_cause": cause or self.cause_map.get(f"{key}|{direction}"),
+                              "score": round(score, 2) if score is not None else None,
+                              "contributions": contributions or {},
                               "window_min": RECENT // MINUTE, "baseline_min": BASELINE // MINUTE,
                               "signals": signals})
 
