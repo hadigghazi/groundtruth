@@ -27,6 +27,7 @@ log = logging.getLogger("groundtruth.simulator")
 SEND_S = 0.1          # publish the ticks gathered over this much wall time together
 FAST_BATCH = 25       # at full speed, ticks per publish
 AGENTS_WAIT_S = 90.0  # how long full time waits for the workers' last agent runs
+REGRADE_FOR_S = 900.0  # a worker that replays a match after a takeover reports late; grade again until then
 
 
 @dataclass
@@ -45,6 +46,7 @@ class SimulatorService:
         self.p = platform
         self.league = build_league()
         self.running: dict[str, Running] = {}
+        self.graded: dict[str, tuple[Running, dict, dict, float]] = {}  # kept for late reports
 
     async def run(self) -> None:
         await self.p.bus.consume("control", "simulator", self._on_control)
@@ -72,6 +74,11 @@ class SimulatorService:
             await self.p.broadcaster.send(mid, [{"type": "speed", "speed": m.speed}])
         elif m is not None and kind == "agents_done":
             m.agents_done.set()
+        elif kind == "agents_done" and mid in self.graded:  # a replaying worker finished after we graded
+            g, doc, meta, at = self.graded[mid]
+            if time.time() - at <= REGRADE_FOR_S:
+                log.info("%s: the workers reported late; grading again", mid)
+                await self._full_time(g, doc, meta)
         await d.checkpoint()
 
     async def _play(self, m: Running, doc: dict) -> None:
@@ -112,6 +119,9 @@ class SimulatorService:
             except asyncio.TimeoutError:
                 log.warning("%s: no word from the workers; grading what is in the store", mid)
             await self._full_time(m, doc, meta)
+            self.graded[mid] = (m, doc, meta, time.time())
+            for old in [k for k, v in self.graded.items() if time.time() - v[3] > REGRADE_FOR_S]:
+                self.graded.pop(old, None)
         except Exception:
             log.exception("match %s failed", mid)
             await self.p.store.upsert([{**doc, "status": "failed", "meta": meta}])

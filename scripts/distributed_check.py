@@ -112,8 +112,13 @@ def main() -> None:
         procs.append(start("worker", 8003))
         card2 = wait("full time after the takeover", lambda: finished(mid2), 900, mid2)
         _, agents2 = call(f"/api/matches/{mid2}/agents")
-        replay = [line for line in open("role-worker-8003.log") if "replaying" in line and mid2 in line]
-        print("takeover:", replay[0].strip() if replay else "the new worker had nothing to replay")
+        log2 = [line.strip() for line in open("role-worker-8003.log") if mid2 in line]
+        took = next((line for line in log2 if "on partition" in line), None)
+        assert took, "the new worker never took the match over"
+        print("takeover:", took)
+        print("replay:", next((line for line in log2 if "replaying" in line), "no moments had been explained before the kill"))
+        time.sleep(20)  # the replaying worker may report after full time; the simulator grades again
+        card2 = finished(mid2) or card2
         assert agents2["runs"] and card2["changes"] is not None
         print(f"match 2 survived the takeover: {len(agents2['runs'])} agent runs, scorecard written")
     finally:

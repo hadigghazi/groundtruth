@@ -190,10 +190,11 @@ class EventHubsBus:
         from azure.eventhub.aio import EventHubConsumerClient
 
         hub, store = self.hubs[topic], self._checkpoints()
-        client = (EventHubConsumerClient.from_connection_string(self.connection_string, group, eventhub_name=hub,
-                                                                checkpoint_store=store)
+        # short leases: when a replica dies, another owns its partitions within about 20 seconds
+        lease = {"checkpoint_store": store, "load_balancing_interval": 5, "partition_ownership_expiration_interval": 20}
+        client = (EventHubConsumerClient.from_connection_string(self.connection_string, group, eventhub_name=hub, **lease)
                   if self.connection_string else
-                  EventHubConsumerClient(self.namespace, hub, group, self._credential(), checkpoint_store=store))
+                  EventHubConsumerClient(self.namespace, hub, group, self._credential(), **lease))
 
         async def on_batch(ctx, events):
             for e in events:
