@@ -95,6 +95,31 @@ jobs:
           name: screens
           path: web/shots
 
+  distributed:
+    # The roles as separate processes over the real Azure SDKs, against the Event Hubs, Cosmos DB
+    # and Storage emulators: a match end to end, then a worker killed mid-match and replaced.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: docker compose -f infra/emulators/compose.yml up -d
+      - run: pip install -e ".[api,agents,azure]" azure-storage-blob
+      - name: Wait for the emulators
+        run: |
+          for i in $(seq 1 60); do curl -s -o /dev/null http://127.0.0.1:8081/ && break; sleep 3; done
+          sleep 20  # the Event Hubs emulator needs its metadata store up first
+          docker compose -f infra/emulators/compose.yml ps
+      - run: python scripts/distributed_check.py
+      - name: Role logs
+        if: always()
+        run: |
+          for f in role-*.log; do echo "=== $f"; tail -40 "$f"; done
+          docker compose -f infra/emulators/compose.yml logs --tail 30 eventhubs cosmos
+
   infra:
     # Compile the Bicep so template errors show up on every push, deployed or not.
     runs-on: ubuntu-latest

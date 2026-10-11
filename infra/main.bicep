@@ -1,38 +1,53 @@
 // Everything GroundTruth runs on, in one resource group. Deployed by CI on every push to main.
 //
-//   Container Apps environment ── groundtruth app (API, agents, web; one replica: live sessions
-//   │                              are in memory)
-//   ├── Log Analytics + Application Insights (traces from Agent Framework, logs)
-//   Microsoft Foundry account + project ── two model deployments (Tactician; judge and writers)
-//   Event Hubs (Basic) ── match-feed hub: the live event stream between engine and studio
-//   Container Registry (Basic) ── images, pulled with the app's identity
-//   Budget with alerts to the subscription owner
+//   simulator app --events, 10 Hz ticks--> Event Hubs: match-events (partition = match)
+//        ^  (holds the truth log)                  |
+//        |                                         v
+//   Event Hubs: match-control <-- api app      worker app (scales out; owns match partitions:
+//   (start, console, speed, outage,                stats, captions, cues, Agent Framework on Foundry)
+//    agents_done)                                  |
+//                                                  v
+//                         Cosmos DB (serverless) + Web PubSub (one group per match) --> viewers
 //
-// The app reaches Foundry, Event Hubs and the registry with a user-assigned managed
-// identity: no keys or connection strings with secrets anywhere.
+//   Microsoft Foundry account + project: two model deployments, Speech for the commentary
+//   Blob Storage: Event Hubs checkpoints | Log Analytics + Application Insights | Registry
+//   Optional API Management (consumption) in front of the overlay API | a budget with alerts
+//
+// Three user-assigned identities, one per role, each with only the roles it needs. No keys
+// or connection strings anywhere: every service has local auth turned off.
 
 targetScope = 'resourceGroup'
 
 @description('Region for everything. Pick one where both model deployments are available.')
 param location string = resourceGroup().location
 
-@description('Image for the app. CI first deploys with no image (registry and services only), pushes, then deploys again with the image.')
+@description('Image for the apps. CI first deploys with no image (services only), pushes, then deploys again with it.')
 param appImage string = ''
 
 @description('Model for the Tactician (reasoning over the evidence).')
 param largeModel object = { name: 'gpt-4.1-mini', version: '2025-04-14', capacity: 30 }
 
-@description('Model for the Verifier\'s judge and the Persona writers (short, fast calls).')
+@description('Model for the judge, the Challenger, the writers and the desk (short, fast calls).')
 param smallModel object = { name: 'gpt-4.1-mini', version: '2025-04-14', capacity: 30 }
 
 @description('Role definition id of "Azure AI User", resolved by CI. Empty skips the assignment.')
 param aiUserRoleId string = ''
 
+@description('Web PubSub tier: Free_F1 (20 connections) for development, Standard_S1 for the judging window.')
+@allowed(['Free_F1', 'Standard_S1'])
+param webPubSubSku string = 'Free_F1'
+
+@description('Put API Management (consumption tier) in front of the overlay API for partners.')
+param apiManagement bool = false
+
+@description('Publisher e-mail for API Management, required when apiManagement is true.')
+param publisherEmail string = ''
+
 @description('Extra addresses for budget alerts (the subscription Owner always gets them).')
 param alertEmails array = []
 
 @description('Monthly budget for the resource group, in the billing currency.')
-param budgetAmount int = 60
+param budgetAmount int = 120
 
 var budgetStart = '2026-10-01' // a budget's start date cannot change once created
 
@@ -42,16 +57,25 @@ var tags = { app: name, purpose: 'inside-the-game-hackathon' }
 
 var roles = {
   acrPull: '7f951dda-4ed3-4680-a7ca-43fe172d538d'
-  eventHubsDataOwner: 'f526a384-b230-433a-b45c-95f59c4a2dec'
+  eventHubsSender: '2b629674-e913-4c01-ae53-ef4638d8f975'
+  eventHubsReceiver: 'a638d3c7-ab3a-418d-83e6-5f17a39d4fde'
+  blobContributor: 'ba92f5b4-2d11-453d-a403-e96b0029c9fe'
+  webPubSubOwner: '12cf5a90-567b-43ae-8102-96cf46c7d9b4'
   openAiUser: '5e0bd9bd-7b93-4f28-af87-19fc36ad61bd'
   speechUser: 'f2dc8367-1007-4938-bd23-fe263f013447'
 }
+var cosmosDataContributor = '00000000-0000-0000-0000-000000000002'
 
-resource identity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
-  name: '${name}-app-id'
+// ---------------------------------------------------------------- identities
+
+// index 0 = api, 1 = worker, 2 = simulator
+var roleNames = ['api', 'worker', 'simulator']
+
+resource ids 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = [for r in roleNames: {
+  name: '${name}-${r}-id'
   location: location
   tags: tags
-}
+}]
 
 // ---------------------------------------------------------------- monitoring
 
@@ -87,15 +111,50 @@ resource registry 'Microsoft.ContainerRegistry/registries@2023-07-01' = {
   properties: { adminUserEnabled: false }
 }
 
-resource registryPull 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(registry.id, identity.id, roles.acrPull)
+resource registryPull 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for (r, i) in roleNames: {
+  name: guid(registry.id, r, roles.acrPull)
   scope: registry
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roles.acrPull)
-    principalId: identity.properties.principalId
+    principalId: ids[i].properties.principalId
     principalType: 'ServicePrincipal'
   }
+}]
+
+// ------------------------------------------------------------------- storage
+
+resource storage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
+  name: 'gt${suffix}'
+  location: location
+  tags: tags
+  sku: { name: 'Standard_LRS' }
+  kind: 'StorageV2'
+  properties: {
+    allowSharedKeyAccess: false
+    allowBlobPublicAccess: false
+    minimumTlsVersion: 'TLS1_2'
+  }
 }
+
+resource blobs 'Microsoft.Storage/storageAccounts/blobServices@2023-05-01' = {
+  parent: storage
+  name: 'default'
+}
+
+resource checkpoints 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' = {
+  parent: blobs
+  name: 'checkpoints'
+}
+
+resource checkpointWriters 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for i in [1, 2]: {
+  name: guid(storage.id, roleNames[i], roles.blobContributor)
+  scope: storage
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roles.blobContributor)
+    principalId: ids[i].properties.principalId
+    principalType: 'ServicePrincipal'
+  }
+}]
 
 // ---------------------------------------------------------------- event hubs
 
@@ -103,28 +162,138 @@ resource eventHubs 'Microsoft.EventHub/namespaces@2024-01-01' = {
   name: '${name}-events-${suffix}'
   location: location
   tags: tags
-  sku: { name: 'Basic', tier: 'Basic', capacity: 1 }
+  sku: { name: 'Standard', tier: 'Standard', capacity: 1 } // Standard: consumer groups per role
   properties: { disableLocalAuth: true }
 }
 
-resource matchFeed 'Microsoft.EventHub/namespaces/eventhubs@2024-01-01' = {
+resource feed 'Microsoft.EventHub/namespaces/eventhubs@2024-01-01' = {
   parent: eventHubs
-  name: 'match-feed'
+  name: 'match-events'
+  properties: { partitionCount: 4, messageRetentionInDays: 1 }
+}
+
+resource control 'Microsoft.EventHub/namespaces/eventhubs@2024-01-01' = {
+  parent: eventHubs
+  name: 'match-control'
+  properties: { partitionCount: 1, messageRetentionInDays: 1 }
+}
+
+resource feedWorkers 'Microsoft.EventHub/namespaces/eventhubs/consumergroups@2024-01-01' = {
+  parent: feed
+  name: 'workers'
+}
+
+resource controlWorkers 'Microsoft.EventHub/namespaces/eventhubs/consumergroups@2024-01-01' = {
+  parent: control
+  name: 'workers'
+}
+
+resource controlSimulator 'Microsoft.EventHub/namespaces/eventhubs/consumergroups@2024-01-01' = {
+  parent: control
+  name: 'simulator'
+}
+
+// each role may only send or read what it needs, hub by hub
+var feedGrantList = [
+  { who: 2, role: roles.eventHubsSender }
+  { who: 1, role: roles.eventHubsReceiver }
+]
+var controlGrantList = [
+  { who: 0, role: roles.eventHubsSender }
+  { who: 1, role: roles.eventHubsSender }
+  { who: 1, role: roles.eventHubsReceiver }
+  { who: 2, role: roles.eventHubsReceiver }
+]
+
+resource feedGrants 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for g in feedGrantList: {
+  name: guid(feed.id, roleNames[g.who], g.role)
+  scope: feed
   properties: {
-    partitionCount: 2
-    messageRetentionInDays: 1
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', g.role)
+    principalId: ids[g.who].properties.principalId
+    principalType: 'ServicePrincipal'
+  }
+}]
+
+resource controlGrants 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for g in controlGrantList: {
+  name: guid(control.id, roleNames[g.who], g.role)
+  scope: control
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', g.role)
+    principalId: ids[g.who].properties.principalId
+    principalType: 'ServicePrincipal'
+  }
+}]
+
+// -------------------------------------------------------------------- cosmos
+
+resource cosmos 'Microsoft.DocumentDB/databaseAccounts@2024-05-15' = {
+  name: '${name}-data-${suffix}'
+  location: location
+  tags: tags
+  kind: 'GlobalDocumentDB'
+  properties: {
+    databaseAccountOfferType: 'Standard'
+    capabilities: [{ name: 'EnableServerless' }]
+    locations: [{ locationName: location, failoverPriority: 0 }]
+    consistencyPolicy: { defaultConsistencyLevel: 'Session' }
+    disableLocalAuth: true
   }
 }
 
-resource eventHubsAccess 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(eventHubs.id, identity.id, roles.eventHubsDataOwner)
-  scope: eventHubs
+resource database 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases@2024-05-15' = {
+  parent: cosmos
+  name: 'groundtruth'
+  properties: { resource: { id: 'groundtruth' } }
+}
+
+resource matchdata 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers@2024-05-15' = {
+  parent: database
+  name: 'matchdata'
   properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roles.eventHubsDataOwner)
-    principalId: identity.properties.principalId
-    principalType: 'ServicePrincipal'
+    resource: {
+      id: 'matchdata'
+      partitionKey: { paths: ['/match_id'], kind: 'Hash' }
+      defaultTtl: 2592000 // matches clean themselves up after 30 days
+    }
   }
 }
+
+resource cosmosGrants 'Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments@2024-05-15' = [for (r, i) in roleNames: {
+  parent: cosmos
+  name: guid(cosmos.id, r, cosmosDataContributor)
+  properties: {
+    roleDefinitionId: '${cosmos.id}/sqlRoleDefinitions/${cosmosDataContributor}'
+    principalId: ids[i].properties.principalId
+    scope: cosmos.id
+  }
+}]
+
+// ---------------------------------------------------------------- web pubsub
+
+resource webPubSub 'Microsoft.SignalRService/webPubSub@2024-03-01' = {
+  name: '${name}-live-${suffix}'
+  location: location
+  tags: tags
+  sku: { name: webPubSubSku, capacity: 1 }
+  properties: { disableLocalAuth: true }
+}
+
+resource liveHub 'Microsoft.SignalRService/webPubSub/hubs@2024-03-01' = {
+  parent: webPubSub
+  name: 'groundtruth'
+  properties: { anonymousConnectPolicy: 'deny' } // viewers connect with a token from /connect
+}
+
+resource webPubSubGrants 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for (r, i) in roleNames: {
+  name: guid(webPubSub.id, r, roles.webPubSubOwner)
+  scope: webPubSub
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roles.webPubSubOwner)
+    principalId: ids[i].properties.principalId
+    principalType: 'ServicePrincipal'
+  }
+}]
 
 // ------------------------------------------------------------------- foundry
 
@@ -174,38 +343,23 @@ resource small 'Microsoft.CognitiveServices/accounts/deployments@2025-06-01' = {
   dependsOn: [large] // one deployment at a time on an account
 }
 
-resource foundryOpenAi 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(foundry.id, identity.id, roles.openAiUser)
+// the worker's agents and the API's desk call the models; only the API speaks
+var foundryGrants = concat(
+  [{ who: 1, role: roles.openAiUser }, { who: 0, role: roles.openAiUser }, { who: 0, role: roles.speechUser }],
+  empty(aiUserRoleId) ? [] : [{ who: 1, role: aiUserRoleId }, { who: 0, role: aiUserRoleId }]
+)
+
+resource foundryAccess 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for g in foundryGrants: {
+  name: guid(foundry.id, roleNames[g.who], g.role)
   scope: foundry
   properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roles.openAiUser)
-    principalId: identity.properties.principalId
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', g.role)
+    principalId: ids[g.who].properties.principalId
     principalType: 'ServicePrincipal'
   }
-}
+}]
 
-// the same account serves neural text to speech for the spoken commentary
-resource foundrySpeech 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(foundry.id, identity.id, roles.speechUser)
-  scope: foundry
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roles.speechUser)
-    principalId: identity.properties.principalId
-    principalType: 'ServicePrincipal'
-  }
-}
-
-resource foundryUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(aiUserRoleId)) {
-  name: guid(foundry.id, identity.id, 'azure-ai-user')
-  scope: foundry
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', aiUserRoleId)
-    principalId: identity.properties.principalId
-    principalType: 'ServicePrincipal'
-  }
-}
-
-// ----------------------------------------------------------------- the app
+// ------------------------------------------------------------------ the apps
 
 resource environment 'Microsoft.App/managedEnvironments@2024-03-01' = {
   name: '${name}-env'
@@ -224,57 +378,153 @@ resource environment 'Microsoft.App/managedEnvironments@2024-03-01' = {
 
 var projectEndpoint = 'https://${foundry.properties.customSubDomainName}.services.ai.azure.com/api/projects/${project.name}'
 
-resource app 'Microsoft.App/containerApps@2024-03-01' = if (!empty(appImage)) {
+var platformEnv = [
+  { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: insights.properties.ConnectionString }
+  { name: 'EVENTHUB_NAMESPACE', value: '${eventHubs.name}.servicebus.windows.net' }
+  { name: 'CHECKPOINT_BLOB_URL', value: storage.properties.primaryEndpoints.blob }
+  { name: 'COSMOS_ENDPOINT', value: cosmos.properties.documentEndpoint }
+  { name: 'WEBPUBSUB_ENDPOINT', value: 'https://${webPubSub.properties.hostName}' }
+]
+var modelEnv = [
+  { name: 'GROUNDTRUTH_LLM', value: 'foundry' }
+  { name: 'FOUNDRY_PROJECT_ENDPOINT', value: projectEndpoint }
+  { name: 'GROUNDTRUTH_MODEL_LARGE', value: large.name }
+  { name: 'GROUNDTRUTH_MODEL_SMALL', value: small.name }
+]
+var probes = [{ type: 'Liveness', httpGet: { path: '/api/ping', port: 8000 }, periodSeconds: 30 }]
+
+resource api 'Microsoft.App/containerApps@2024-03-01' = if (!empty(appImage)) {
   name: name
   location: location
   tags: tags
-  identity: {
-    type: 'UserAssigned'
-    userAssignedIdentities: { '${identity.id}': {} }
-  }
+  identity: { type: 'UserAssigned', userAssignedIdentities: { '${ids[0].id}': {} } }
   properties: {
     managedEnvironmentId: environment.id
     configuration: {
       activeRevisionsMode: 'Single'
-      ingress: {
-        external: true
-        targetPort: 8000
-        transport: 'auto' // HTTP/1.1 upgrade, so WebSockets work
-        allowInsecure: false
-      }
-      registries: [
-        { server: registry.properties.loginServer, identity: identity.id }
-      ]
+      ingress: { external: true, targetPort: 8000, transport: 'auto', allowInsecure: false }
+      registries: [{ server: registry.properties.loginServer, identity: ids[0].id }]
     }
     template: {
       containers: [
         {
-          name: 'app'
+          name: 'api'
           image: appImage
           resources: { cpu: json('0.5'), memory: '1Gi' }
-          env: [
-            { name: 'GROUNDTRUTH_LLM', value: 'foundry' }
-            { name: 'FOUNDRY_PROJECT_ENDPOINT', value: projectEndpoint }
-            { name: 'GROUNDTRUTH_MODEL_LARGE', value: large.name }
-            { name: 'GROUNDTRUTH_MODEL_SMALL', value: small.name }
-            { name: 'AZURE_CLIENT_ID', value: identity.properties.clientId } // DefaultAzureCredential picks this identity
-            { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: insights.properties.ConnectionString }
-            { name: 'EVENTHUB_FQDN', value: '${eventHubs.name}.servicebus.windows.net' }
-            { name: 'EVENTHUB_NAME', value: matchFeed.name }
-            { name: 'GROUNDTRUTH_AGENT_BUDGET_S', value: '20' }
+          env: concat(platformEnv, modelEnv, [
+            { name: 'AZURE_CLIENT_ID', value: ids[0].properties.clientId }
+            { name: 'GROUNDTRUTH_ROLES', value: 'api' }
             { name: 'GROUNDTRUTH_SPEECH_REGION', value: location }
             { name: 'GROUNDTRUTH_SPEECH_RESOURCE_ID', value: foundry.id }
-          ]
-          probes: [
-            { type: 'Liveness', httpGet: { path: '/api/health', port: 8000 }, periodSeconds: 30 }
-          ]
+          ])
+          probes: probes
         }
       ]
-      // One replica: a live match lives in memory, so every viewer must reach the same one.
+      // stateless: every read comes from Cosmos DB, every viewer connects to Web PubSub
+      scale: { minReplicas: 1, maxReplicas: 3, rules: [{ name: 'http', http: { metadata: { concurrentRequests: '50' } } }] }
+    }
+  }
+  dependsOn: [registryPull, cosmosGrants, controlGrants, webPubSubGrants, foundryAccess]
+}
+
+resource worker 'Microsoft.App/containerApps@2024-03-01' = if (!empty(appImage)) {
+  name: '${name}-worker'
+  location: location
+  tags: tags
+  identity: { type: 'UserAssigned', userAssignedIdentities: { '${ids[1].id}': {} } }
+  properties: {
+    managedEnvironmentId: environment.id
+    configuration: {
+      activeRevisionsMode: 'Single'
+      registries: [{ server: registry.properties.loginServer, identity: ids[1].id }]
+    }
+    template: {
+      containers: [
+        {
+          name: 'worker'
+          image: appImage
+          resources: { cpu: json('1.0'), memory: '2Gi' }
+          env: concat(platformEnv, modelEnv, [
+            { name: 'AZURE_CLIENT_ID', value: ids[1].properties.clientId }
+            { name: 'GROUNDTRUTH_ROLES', value: 'worker' }
+            { name: 'GROUNDTRUTH_AGENT_BUDGET_S', value: '20' }
+          ])
+          probes: probes
+        }
+      ]
+      // replicas share the feed's partitions through the checkpoint store; add one, add matches
+      scale: {
+        minReplicas: 1
+        maxReplicas: 4
+        rules: [{ name: 'cpu', custom: { type: 'cpu', metadata: { type: 'Utilization', value: '70' } } }]
+      }
+    }
+  }
+  dependsOn: [registryPull, cosmosGrants, feedGrants, controlGrants, webPubSubGrants, foundryAccess, checkpointWriters]
+}
+
+resource simulator 'Microsoft.App/containerApps@2024-03-01' = if (!empty(appImage)) {
+  name: '${name}-simulator'
+  location: location
+  tags: tags
+  identity: { type: 'UserAssigned', userAssignedIdentities: { '${ids[2].id}': {} } }
+  properties: {
+    managedEnvironmentId: environment.id
+    configuration: {
+      activeRevisionsMode: 'Single'
+      registries: [{ server: registry.properties.loginServer, identity: ids[2].id }]
+    }
+    template: {
+      containers: [
+        {
+          name: 'simulator'
+          image: appImage
+          resources: { cpu: json('0.5'), memory: '1Gi' }
+          env: concat(platformEnv, [
+            { name: 'AZURE_CLIENT_ID', value: ids[2].properties.clientId }
+            { name: 'GROUNDTRUTH_ROLES', value: 'simulator' }
+          ])
+          probes: probes
+        }
+      ]
+      // one replica: it alone holds each match's truth log until full time
       scale: { minReplicas: 1, maxReplicas: 1 }
     }
   }
-  dependsOn: [registryPull, foundryOpenAi, eventHubsAccess]
+  dependsOn: [registryPull, cosmosGrants, feedGrants, controlGrants, webPubSubGrants, checkpointWriters]
+}
+
+// ------------------------------------------------------ partners: API Management
+
+resource apim 'Microsoft.ApiManagement/service@2023-09-01-preview' = if (apiManagement && !empty(appImage)) {
+  name: '${name}-apim-${suffix}'
+  location: location
+  tags: tags
+  sku: { name: 'Consumption', capacity: 0 }
+  properties: { publisherEmail: publisherEmail, publisherName: 'GroundTruth' }
+}
+
+resource overlayApi 'Microsoft.ApiManagement/service/apis@2023-09-01-preview' = if (apiManagement && !empty(appImage)) {
+  parent: apim
+  name: 'groundtruth'
+  properties: {
+    displayName: 'GroundTruth overlay API'
+    path: 'groundtruth'
+    protocols: ['https']
+    subscriptionRequired: true
+    format: 'openapi+json-link'
+    value: 'https://${api.properties.configuration.ingress.fqdn}/openapi.json'
+    serviceUrl: 'https://${api.properties.configuration.ingress.fqdn}'
+  }
+}
+
+resource overlayPolicy 'Microsoft.ApiManagement/service/apis/policies@2023-09-01-preview' = if (apiManagement && !empty(appImage)) {
+  parent: overlayApi
+  name: 'policy'
+  properties: {
+    format: 'rawxml'
+    value: '<policies><inbound><base /><rate-limit-by-key calls="120" renewal-period="60" counter-key="@(context.Subscription.Id)" /></inbound><backend><base /></backend><outbound><base /></outbound><on-error><base /></on-error></policies>'
+  }
 }
 
 // ----------------------------------------------------------------- budget

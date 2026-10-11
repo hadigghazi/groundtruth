@@ -1,0 +1,15 @@
+{
+  "UserConfig": {
+    "NamespaceConfig": [
+      {
+        "Type": "EventHub",
+        "Name": "emulatorNs1",
+        "Entities": [
+          { "Name": "match-events", "PartitionCount": "4", "ConsumerGroups": [{ "Name": "workers" }] },
+          { "Name": "match-control", "PartitionCount": "1", "ConsumerGroups": [{ "Name": "workers" }, { "Name": "simulator" }] }
+        ]
+      }
+    ],
+    "LoggingConfig": { "Type": "File" }
+  }
+}

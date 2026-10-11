@@ -62,6 +62,8 @@ class WorkerService:
             s = MatchSession(MatchMeta.model_validate(msg["meta"]))
             s.outage = bool(doc and doc.get("outage"))
             s.done_moments = {r["moment_id"] for r in await self.p.store.query(mid, "run")}
+            if s.done_moments:
+                log.warning("replaying %s from kick-off: %d moments already explained, skipped", mid, len(s.done_moments))
             if self.agents:
                 self._attach(s)
             self.sessions[mid] = s

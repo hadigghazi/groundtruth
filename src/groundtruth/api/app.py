@@ -160,6 +160,12 @@ async def _hello(match_id: str) -> dict | None:
 
 # ------------------------------------------------------------------ endpoints
 
+@app.get("/api/ping")
+def ping() -> dict:
+    """Liveness for the platform's probes: answers without touching the store."""
+    return {"ok": True}
+
+
 @app.get("/api/health")
 async def health() -> dict:
     live = sum(m.get("status") in LIVE for m in await P().store.matches())
