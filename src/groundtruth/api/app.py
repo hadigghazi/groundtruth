@@ -52,6 +52,18 @@ class Outage(BaseModel):
     on: bool
 
 
+class CatchUp(BaseModel):
+    lang: Literal["en", "es", "ar"] = "en"
+    mode: Literal["analyst", "casual"] = "casual"
+    as_of_t: int | None = None  # the viewer's playhead; defaults to the live edge
+
+
+class Ask(BaseModel):
+    question: str = Field(min_length=2, max_length=300)
+    lang: Literal["en", "es", "ar"] = "en"
+    as_of_t: int | None = None
+
+
 def _session(match_id: str) -> MatchSession:
     s = sessions.get(match_id)
     if s is None:
@@ -181,6 +193,39 @@ def set_outage(match_id: str, req: Outage) -> dict:
     return {"ok": True, "outage": s.outage}
 
 
+@app.post("/api/matches/{match_id}/catchup")
+async def catch_up(match_id: str, req: CatchUp) -> dict:
+    """A summary of the match up to the viewer's playhead, never beyond it."""
+    from ..agents.desk import brief, fallback_recap
+
+    s = _session(match_id)
+    as_of = min(req.as_of_t if req.as_of_t is not None else s.stats.t, s.stats.t)
+    desk = getattr(s, "desk", None)
+    refused = "simulated model outage" if s.outage else (GUARD.admit() if desk else "agents are off")
+    if refused:
+        return {**fallback_recap(brief(s, as_of), req.lang), "verified": True, "fallback": True,
+                "problems": [refused], "minute": brief(s, as_of)["minute"]}
+    out = await desk.recap(as_of, req.lang, req.mode)
+    GUARD.spend(out.get("tokens_in", 0) + out.get("tokens_out", 0))
+    return out
+
+
+@app.post("/api/matches/{match_id}/ask")
+async def ask(match_id: str, req: Ask) -> dict:
+    """A question about the match so far, answered by the desk agent from the match up to the playhead."""
+    s = _session(match_id)
+    desk = getattr(s, "desk", None)
+    if desk is None or s.outage:
+        raise HTTPException(503, "the desk is offline")
+    refused = GUARD.admit()
+    if refused:
+        raise HTTPException(429, refused)
+    as_of = min(req.as_of_t if req.as_of_t is not None else s.stats.t, s.stats.t)
+    out = await desk.ask(req.question, as_of, req.lang)
+    GUARD.spend(out.get("tokens_in", 0) + out.get("tokens_out", 0))
+    return out
+
+
 @app.get("/api/agents")
 def agents_overview() -> dict:
     """Agent performance across every match on this server."""
@@ -267,6 +312,13 @@ def _attach_agents(s: MatchSession) -> None:
     except Exception:  # a misconfigured model must not stop the match
         logging.getLogger("groundtruth").exception("agents not attached")
 
+
+try:  # the match's tools over MCP, for any MCP client
+    from .mcp_server import mount_mcp
+
+    mount_mcp(app, sessions)
+except Exception:  # not installed, or an SDK change: the match server runs without it
+    logging.getLogger("groundtruth").warning("mcp is off", exc_info=True)
 
 _web = os.environ.get("GROUNDTRUTH_WEB_DIR")
 if _web and Path(_web).is_dir():  # the built web app, served after every /api route

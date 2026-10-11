@@ -90,7 +90,8 @@ class _ScriptedClient(BaseChatClient):
                 break
         kind = task.get("task", "")
         self.calls.append(kind)
-        reply = {"tactician": self._tactician, "judge": self._judge, "persona": self._persona}.get(
+        reply = {"tactician": self._tactician, "judge": self._judge, "persona": self._persona,
+                 "recap": self._recap, "ask": self._ask}.get(
             kind, lambda t: {"error": "unknown task"})(task)
 
         async def respond() -> ChatResponse:
@@ -135,6 +136,25 @@ class _ScriptedClient(BaseChatClient):
                                            before=_fmt(key, claims["before"]["value"]),
                                            after=_fmt(key, claims["after"]["value"]))
         return {"analyst": {"headline": head, "body": analyst}, "casual": {"headline": head, "body": BODY[lang][1]}}
+
+
+    @staticmethod
+    def _score(b: dict) -> tuple[str, str, int, int, int]:
+        h, a = b["teams"][b["home"]], b["teams"][b["away"]]
+        return h["short_name"], a["short_name"], h.get("goals", 0), a.get("goals", 0), b["minute"]
+
+    def _recap(self, task: dict) -> dict:
+        home, away, h, a, m = self._score(task["pack"])
+        latest = task["pack"]["insights"][-1]["headline"] if task["pack"]["insights"] else ""
+        body = {"en": f"After {m} minutes.", "es": f"Tras {m} minutos.", "ar": f"بعد {m} دقيقة."}[task["lang"]]
+        return {"headline": f"{home} {h}-{a} {away}", "body": f"{body} {latest}".strip()}
+
+    def _ask(self, task: dict) -> dict:
+        home, away, h, a, m = self._score(task["brief"])
+        text = {"en": f"At minute {m} it is {home} {h}-{a} {away}.",
+                "es": f"En el minuto {m}, {home} {h}-{a} {away}.",
+                "ar": f"في الدقيقة {m}، النتيجة {home} {h}-{a} {away}."}[task["lang"]]
+        return {"answer": text, "out_of_scope": False}
 
 
 class ScriptedChatClient(  # type: ignore[misc]

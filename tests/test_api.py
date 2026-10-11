@@ -66,5 +66,18 @@ def test_overlays_scorecard_and_agent_metrics():
         assert client.get(f"/api/matches/{mid}/scorecard").status_code == 409
         agents = client.get(f"/api/matches/{mid}/agents").json()
         assert agents["outage"] is False and "summary" in agents
+        recap = client.post(f"/api/matches/{mid}/catchup", json={"lang": "es"}).json()
+        assert recap["headline"] and recap["verified"]
         assert client.post(f"/api/matches/{mid}/agents/outage", json={"on": True}).json()["outage"] is True
+        assert client.post(f"/api/matches/{mid}/catchup", json={"lang": "en"}).json()["fallback"] is True
+        assert client.post(f"/api/matches/{mid}/ask", json={"question": "Who leads?"}).status_code == 503
         assert client.get("/api/agents").json()["matches"] >= 1
+
+
+def test_mcp_lists_the_match_tools():
+    with TestClient(app) as client:
+        r = client.post("/mcp/", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+                        headers={"accept": "application/json, text/event-stream"})
+        assert r.status_code == 200, r.text
+        for name in ("list_matches", "match_brief", "team_window", "player_report", "key_moments", "scorecard"):
+            assert name in r.text

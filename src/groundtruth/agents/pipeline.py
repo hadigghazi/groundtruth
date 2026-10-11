@@ -99,6 +99,7 @@ class Outcome:
     written: list[Written]
     reasons: list[str]
     attempts: int
+    pack: dict | None = None  # the evidence it was written from, kept for evaluation
 
 
 Board = Callable[..., None]  # board(moment_id, stage, **details)
@@ -381,5 +382,6 @@ class AgentTeam:
             AS_OF.reset(token)
         outputs = result.get_outputs()
         if not outputs:
-            return Outcome(m, None, [], ["the workflow produced no output"], 0)
+            return Outcome(m, None, [], ["the workflow produced no output"], 0, pack)
+        outputs[0].pack = pack
         return outputs[0]

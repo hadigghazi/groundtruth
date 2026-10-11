@@ -17,7 +17,6 @@ import itertools
 import json
 import os
 
-from ..agents.evidence import evidence_pack
 from ..agents.guard import UsageGuard, summarize
 from ..agents.hook import attach_agents
 from ..league import build_league
@@ -36,13 +35,9 @@ async def _play(home: str, away: str, seed: int, speed: float, kind: str | None,
     s = MatchSession(league[home], league[away], seed=seed, match_id=f"ae{seed}", speed=speed)
     attach_agents(s, kind=kind, budget_s=budget_s, guard=UsageGuard(10_000, 10**9))
     await s.run()
-    moments = {m.moment_id: m for m in s.stats.moments}
-    insights = []
-    for mid, r in s.agent_results.items():
-        m = moments.get(mid)
-        if m is not None and r.get("text"):
-            insights.append({"moment_id": mid, "cause": r["cause"], "text": r["text"],
-                             "evidence": evidence_pack(s.stats, m)})
+    # the pack each insight was written from, kept at the time: the stats windows move on
+    insights = [{"moment_id": mid, "cause": r["cause"], "text": r["text"], "evidence": r["pack"]}
+                for mid, r in s.agent_results.items() if r.get("text") and r.get("pack")]
     return {"seed": seed, "home": home, "away": away, "scorecard": s.scorecard(), "runs": s.agent_runs,
             "insights": insights}
 

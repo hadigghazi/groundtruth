@@ -60,6 +60,16 @@ if (await page.locator(".gt-panel").count()) {
   await page.getByRole("button", { name: "Close" }).click();
 }
 
+await page.getByRole("button", { name: "Catch me up" }).first().click();
+await page.waitForTimeout(2500);
+await shot("08b-catch-up");
+await page.locator(".gt-recap").getByRole("button", { name: "Close" }).click().catch(() => undefined);
+await page.getByRole("tab", { name: /Ask/ }).click();
+await page.locator(".ask-suggest button").first().click();
+await page.waitForTimeout(3000);
+await shot("08c-ask");
+await page.getByRole("tab", { name: /Stats/ }).click();
+
 await page.getByRole("button", { name: "4 viewers" }).click();
 await page.mouse.move(10, 890); // move off the tooltip
 await page.waitForTimeout(3000);

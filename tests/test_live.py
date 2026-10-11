@@ -6,6 +6,7 @@ import asyncio
 
 import pytest
 
+from groundtruth.agents.desk import brief
 from groundtruth.agents.hook import attach_agents
 from groundtruth.live.session import MatchSession
 
@@ -61,3 +62,29 @@ def test_scorecard_scores_rule_and_agents_against_the_truth_log(session):
     for side in ("rule", "agents"):
         assert 0 <= card[side]["right_cause"] <= card[side]["caught"] <= card[side]["changes"]
     assert card["agents_verified"] == len(session.agent_results)
+
+
+def _goals_before(session, t):
+    h = a = 0
+    for m in session.stats.moments:
+        if m.kind == "goal" and m.t <= t:
+            h += m.team_id == session.meta.home.team_id
+            a += m.team_id == session.meta.away.team_id
+    return h, a
+
+
+def test_catch_up_stops_at_the_viewers_playhead(session):
+    mid = session.minutes[len(session.minutes) // 2]["t"]
+    b = brief(session, mid)
+    assert all(m["minute"] <= b["minute"] + 1 for m in b["moments"])
+    out = asyncio.run(session.desk.recap(mid, "en", "casual"))
+    assert out["verified"] and not out["fallback"], out
+    h, a = _goals_before(session, mid)
+    assert f"{h}-{a}" in out["headline"]
+
+
+def test_the_desk_answers_in_the_viewers_language(session):
+    mid = session.minutes[len(session.minutes) // 3]["t"]
+    out = asyncio.run(session.desk.ask("What is the score?", mid, "ar"))
+    assert out["verified"] and out["answer"], out
+    assert any("؀" <= ch <= "ۿ" for ch in out["answer"])

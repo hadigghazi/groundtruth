@@ -50,7 +50,11 @@ class MatchSession:
         self.truth_t: list[int] = []  # play time at which each truth-log change took effect
         self.full_time_card: dict | None = None
         self._tasks: set[asyncio.Task] = set()
-        self.key_events: list = []  # goals and cards, replayed to anyone who joins late
+        self.key_events: list = []  # goals, cards and shots, replayed to anyone who joins late
+        # one snapshot of the totals per minute of play, so questions about "the match so far"
+        # can be answered as of a viewer's delayed playhead, never from later play
+        self.minutes: list[dict] = []
+        self._next_minute = 0
 
     # ------------------------------------------------------------ fan-out
 
@@ -86,6 +90,21 @@ class MatchSession:
     def record_run(self, run: dict) -> None:
         self.agent_runs.append(run)
         self.publish({"type": "agent_run", "run": run, "summary": summarize(self.agent_runs)})
+
+    def _minute_snapshot(self) -> dict:
+        st = self.stats
+        return {"t": st.t, "period": st.period, "clock_ms": st.clock_ms,
+                "teams": {tid: st.teams[tid].view() for tid in st.team_ids},
+                "players": {pid: p.view() for pid, p in st.players.items() if p.km > 0}}
+
+    def as_of(self, t: int) -> dict | None:
+        """The latest per-minute snapshot at or before play time t."""
+        best = None
+        for snap in self.minutes:
+            if snap["t"] > t:
+                break
+            best = snap
+        return best
 
     def scorecard(self) -> dict:
         changes = [{"t": t, "team_id": c.team_id, "label": c.label, "source": c.source,
@@ -133,6 +152,9 @@ class MatchSession:
                 self.publish(self.last_frame)
             if ticks % 50 == 0:
                 self.publish({"type": "state", "state": self.stats.snapshot()})
+            if self.stats.t >= self._next_minute:
+                self._next_minute += 60_000
+                self.minutes.append(self._minute_snapshot())
             ticks += 1
             if self.speed > 0:
                 behind = wall0 + ticks * 0.1 / self.speed - time.perf_counter()

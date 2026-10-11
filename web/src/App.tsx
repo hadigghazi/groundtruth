@@ -2,7 +2,7 @@ import {
   Badge, Button, Dropdown, Field, FluentProvider, Option, SpinButton, Switch, Tab, TabList, ToggleButton, Tooltip,
 } from "@fluentui/react-components";
 import {
-  Bot20Regular, Cube20Regular, DataBarVertical20Regular, Gauge20Regular, Grid20Regular, Map20Regular,
+  Bot20Regular, Chat20Regular, Cube20Regular, DataBarVertical20Regular, Gauge20Regular, Grid20Regular, History20Regular, Map20Regular,
   Settings20Regular, Speaker220Regular, SpeakerMute20Regular, SplitVertical20Regular, Square20Regular, Trophy20Regular,
 } from "@fluentui/react-icons";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
@@ -15,6 +15,8 @@ import { usePlayhead } from "./playhead";
 import { Transport } from "./Transport";
 import { Overlays } from "./Overlays";
 import { AgentTrace } from "./panels/AgentTrace";
+import { AskPanel } from "./panels/Ask";
+import { Recap, fetchRecap, type RecapCard } from "./Recap";
 import { Director } from "./panels/Director";
 import { Evidence } from "./panels/Evidence";
 import { Performance } from "./panels/Performance";
@@ -46,6 +48,11 @@ function ViewerColumn({ buf, viewer, setViewer, view, getT, slowT, compact, seek
   const s = strings(viewer.lang);
   const [open, setOpen] = useState<Cue | null>(null);
   const [voice, setVoice] = useState(false);
+  const [recap, setRecap] = useState<RecapCard | null>(null);
+  const catchUp = async () => {
+    setRecap({ loading: true });
+    try { setRecap(await fetchRecap(meta.match_id, viewer.lang, viewer.mode, getT())); } catch { setRecap(null); }
+  };
   const tags = useRef<Tag[]>([]);
   const getFrame = useCallback((): Frame | null => buf.frameAt(getT()), [buf, getT]);
   const cues = buf.activeCues(slowT, viewer);
@@ -83,6 +90,9 @@ function ViewerColumn({ buf, viewer, setViewer, view, getT, slowT, compact, seek
           <Option value={meta.home.team_id}>{meta.home.short_name}</Option>
           <Option value={meta.away.team_id}>{meta.away.short_name}</Option>
         </Dropdown>
+        <Tooltip content={s.catchUp} relationship="label">
+          <Button size="small" appearance="subtle" icon={<History20Regular />} onClick={() => void catchUp()}>{compact ? "" : s.catchUp}</Button>
+        </Tooltip>
         <Tooltip content={s.voice} relationship="label">
           <ToggleButton size="small" appearance="subtle" checked={voice} onClick={() => setVoice(!voice)}
             icon={voice ? <Speaker220Regular /> : <SpeakerMute20Regular />} />
@@ -104,6 +114,7 @@ function ViewerColumn({ buf, viewer, setViewer, view, getT, slowT, compact, seek
           <Overlays meta={meta} cues={cues} score={buf.scoreAt(slowT)} period={frame?.period ?? 1} clockMs={frame?.clock_ms ?? 0}
             lang={viewer.lang} fullTime={buf.fullTime && slowT >= buf.liveT - 1} scorecard={buf.scorecard}
             runFor={(id) => buf.runFor(id)} onOpen={setOpen} />
+          {recap && <Recap card={recap} lang={viewer.lang} onClose={() => setRecap(null)} />}
         </div>
         {open && <Evidence cue={open} events={evidence} board={buf.board} langs={langs} lang={viewer.lang} onClose={() => setOpen(null)}
           onReplay={() => { seek(open.t_in - 15_000); setOpen(null); }} />}
@@ -112,7 +123,7 @@ function ViewerColumn({ buf, viewer, setViewer, view, getT, slowT, compact, seek
   );
 }
 
-type SideTab = "agents" | "perf" | "director" | "stats" | "score";
+type SideTab = "agents" | "perf" | "director" | "stats" | "ask" | "score";
 
 /** Events the viewer has already seen: nothing past the playhead reaches the analyst panels. */
 function seenEvents(buf: MatchBuffer, t: number) {
@@ -200,6 +211,7 @@ function MatchScreen({ matchId }: { matchId: string }) {
             <Tab value="perf" icon={<Gauge20Regular />}>{s.performance}</Tab>
             <Tab value="director" icon={<Settings20Regular />}>{s.director}</Tab>
             <Tab value="stats" icon={<DataBarVertical20Regular />}>{s.stats}</Tab>
+            <Tab value="ask" icon={<Chat20Regular />}>{s.ask}</Tab>
             <Tab value="score" icon={<Trophy20Regular />}>{s.scorecard}</Tab>
           </TabList>
           <div className="side-body">
@@ -208,6 +220,7 @@ function MatchScreen({ matchId }: { matchId: string }) {
             {tab === "director" && <Director matchId={matchId} meta={meta} log={buf.console} fullTime={buf.fullTime} outage={buf.outage} lang={lead} />}
             {tab === "stats" && <StatsPanel matchId={matchId} meta={meta} state={buf.state} lang={lead} upTo={slow}
               events={seenEvents(buf, slow)} />}
+            {tab === "ask" && <AskPanel matchId={matchId} getT={getT} lang={lead} />}
             {tab === "score" && <ScorecardPanel meta={meta} card={buf.scorecard} lang={lead} />}
           </div>
         </aside>

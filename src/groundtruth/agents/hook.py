@@ -16,6 +16,7 @@ from agent_framework.observability import get_tracer
 
 from ..schema import Cue, Moment
 from .clients import make_clients
+from .desk import Desk
 from .guard import GUARD, UsageGuard, run_record
 from .pipeline import AgentTeam
 
@@ -48,6 +49,7 @@ def attach_agents(session, kind: str | None = None, budget_s: float = 20.0, use_
                      langs=session.builder.langs, use_judge=use_judge)
     session.board = board
     session.agent_team = team
+    session.desk = Desk(session, small)
 
     async def hook(sess, m: Moment, on_air: list[Cue]) -> None:
         mid = m.moment_id
@@ -89,8 +91,10 @@ def attach_agents(session, kind: str | None = None, budget_s: float = 20.0, use_
                 sess.upgrade_cue(cue, old.get(cue.lang))
             board(mid, "upgraded", cues=len(cues), ms=total_ms)
             ins = outcome.insight
-            sess.agent_results[mid] = {"t": m.t, "team_id": ins.team_id, "cause": ins.cause,
-                                       "text": f"{ins.headline}. {ins.explanation} {ins.why_it_matters}"}
+            sess.agent_results[mid] = {"t": m.t, "minute": m.clock_ms // 60_000, "team_id": ins.team_id,
+                                       "cause": ins.cause, "headline": ins.headline,
+                                       "text": f"{ins.headline}. {ins.explanation} {ins.why_it_matters}",
+                                       "pack": outcome.pack}
             kind_ = "verified"
         sess.record_run(run_record(m, entries, kind_, total_ms, outcome.attempts if outcome else 0,
                                    outcome.insight if verified else None))
