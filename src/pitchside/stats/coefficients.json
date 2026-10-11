@@ -1,0 +1,8 @@
+{
+  "pass": {"features": ["dist", "dist_sq", "forward", "lane_gap", "end_space", "under_pressure", "high"],
+           "mean": [0, 0, 0, 0, 0, 0, 0], "scale": [1, 1, 1, 1, 1, 1, 1],
+           "coef": [2.6, -0.05, 0, 0, 0.15, 0.1, -0.6, -0.4]},
+  "shot": {"features": ["goal_dist", "goal_angle", "header", "under_pressure", "blockers", "free_kick"],
+           "mean": [0, 0, 0, 0, 0, 0], "scale": [1, 1, 1, 1, 1, 1],
+           "coef": [-0.6, -0.11, 1.5, -0.7, -0.4, -0.3, -0.6]}
+}
