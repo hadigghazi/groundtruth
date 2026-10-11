@@ -14,12 +14,15 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from collections.abc import Awaitable, Callable
 from typing import Protocol
 
 log = logging.getLogger("groundtruth.bus")
 
 TOPICS = ("events", "control")
+ENVELOPE_BYTES = 200_000  # messages travel packed: one event carries many ticks, well under the 1 MB limit
+RETRY_FOR_S = 90.0        # how long a throttled send keeps retrying before it gives up
 
 
 class Delivery(Protocol):
@@ -128,21 +131,51 @@ class EventHubsBus:
             self._producers[topic] = p
         return p
 
+    @staticmethod
+    def _envelopes(messages: list[dict]) -> list[str]:
+        """Packs messages into as few events as fit: a throughput unit counts events, not messages."""
+        out, part, size = [], [], 0
+        for m in messages:
+            text = json.dumps(m, separators=(",", ":"))
+            if part and size + len(text) > ENVELOPE_BYTES:
+                out.append('{"many":[' + ",".join(part) + "]}")
+                part, size = [], 0
+            part.append(text)
+            size += len(text) + 1
+        if part:
+            out.append('{"many":[' + ",".join(part) + "]}")
+        return out
+
+    async def _send(self, producer, batch) -> None:
+        """Sends, backing off while the hub is throttling; a long match must not die of a busy minute."""
+        deadline, wait = time.monotonic() + RETRY_FOR_S, 1.0
+        while True:
+            try:
+                await producer.send_batch(batch)
+                return
+            except Exception as e:
+                busy = "server-busy" in str(e) or "throttl" in str(e).lower() or "timeout" in type(e).__name__.lower()
+                if not busy or time.monotonic() + wait > deadline:
+                    raise
+                log.warning("event hub busy; retrying in %.0f s", wait)
+                await asyncio.sleep(wait)
+                wait = min(wait * 2, 15.0)
+
     async def publish(self, topic: str, key: str, messages: list[dict]) -> None:
         from azure.eventhub import EventData
 
         producer = self._producer(topic)
         batch = await producer.create_batch(partition_key=key)
-        for m in messages:
-            data = EventData(json.dumps(m, separators=(",", ":")))
+        for env in self._envelopes(messages):
+            data = EventData(env)
             try:
                 batch.add(data)
             except ValueError:  # the batch is full: send it and start another
-                await producer.send_batch(batch)
+                await self._send(producer, batch)
                 batch = await producer.create_batch(partition_key=key)
                 batch.add(data)
         if len(batch):
-            await producer.send_batch(batch)
+            await self._send(producer, batch)
 
     def _checkpoints(self):
         from azure.eventhub.extensions.checkpointstoreblobaio import BlobCheckpointStore
@@ -164,10 +197,13 @@ class EventHubsBus:
 
         async def on_batch(ctx, events):
             for e in events:
-                try:
-                    await handler(json.loads(e.body_as_str()), _HubDelivery(ctx, e))
-                except Exception:
-                    log.exception("handler failed on %s", topic)
+                body = json.loads(e.body_as_str())
+                d = _HubDelivery(ctx, e)
+                for msg in body.get("many", [body]):
+                    try:
+                        await handler(msg, d)
+                    except Exception:
+                        log.exception("handler failed on %s", topic)
 
         async with client:
             # with a checkpoint store, replicas share the partitions between them; a new owner

@@ -105,3 +105,14 @@ def test_the_api_reports_its_platform_and_streams_from_the_store():
         c = client.get(f"/api/matches/{mid}/connect").json()
         assert c["url"] is None and c["hello"]["meta"]["match_id"] == mid  # local mode: stream from this server
         assert client.get("/api/matches/nope/connect").status_code == 404
+
+
+def test_event_hub_envelopes_pack_many_messages_and_unpack_in_order():
+    import json
+
+    from groundtruth.cloud.bus import ENVELOPE_BYTES, EventHubsBus
+
+    msgs = [{"type": "tick", "i": i, "pad": "x" * 900} for i in range(600)]
+    envs = EventHubsBus._envelopes(msgs)
+    assert 1 < len(envs) < len(msgs) and all(len(e) <= ENVELOPE_BYTES + 2000 for e in envs)
+    assert [m["i"] for e in envs for m in json.loads(e)["many"]] == list(range(600))
