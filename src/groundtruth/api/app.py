@@ -1,11 +1,22 @@
-"""HTTP and WebSocket API over live match sessions."""
+"""The API role: stateless HTTP over the store, commands onto the bus, viewers to the broadcaster.
+
+It holds no match in memory. Reads come from the store (cues, runs, snapshots, the
+scorecard); commands (start, console, speed, outage) go onto the control topic for the
+simulator and the workers. On Azure, viewers connect to Web PubSub with a token from
+/connect; locally, to this process's WebSocket.
+
+With no platform configured, this process also runs the simulator and worker roles in
+memory, so one `uvicorn` command is the whole system.
+"""
 
 from __future__ import annotations
 
 import asyncio
-import itertools
+import contextlib
 import logging
 import os
+import secrets
+import time
 from pathlib import Path
 from typing import Literal
 
@@ -14,21 +25,55 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .. import __version__
-from ..league import build_league
 from ..agents.guard import GUARD, summarize
-from ..live.session import MatchSession
+from ..cloud import Platform, from_env
+from ..league import build_league
+from ..live.view import StoreView
 from ..schema import SCHEMA_VERSION, Cue
 from ..sim.tactics import LABELS
 from .speech import Speech
 
+log = logging.getLogger("groundtruth")
 LEAGUE = build_league()
-MAX_LIVE = 6
+MAX_LIVE = int(os.environ.get("GROUNDTRUTH_MAX_LIVE", "6"))
 DELAY_S = float(os.environ.get("GROUNDTRUTH_DELAY_S", "12"))  # the viewer's broadcast delay, in wall seconds
-
-app = FastAPI(title="GroundTruth API", version=__version__)
+LIVE = ("starting", "live")
 speech = Speech.from_env()
-sessions: dict[str, MatchSession] = {}
-_ids = itertools.count(1)
+_mcp = None
+
+
+@contextlib.asynccontextmanager
+async def lifespan(app: FastAPI):
+    platform = from_env()
+    app.state.platform = platform
+    app.state.desk = None
+    tasks = []
+    if "simulator" in platform.roles:
+        from ..live.simulator import SimulatorService
+
+        app.state.simulator = SimulatorService(platform)
+        tasks.append(asyncio.create_task(app.state.simulator.run()))
+    if "worker" in platform.roles:
+        from ..live.worker import WorkerService
+
+        app.state.worker = WorkerService(platform)
+        tasks.append(asyncio.create_task(app.state.worker.run()))
+    log.info("platform %s", platform.describe)
+    async with (_mcp.running() if _mcp else contextlib.nullcontext()):
+        try:
+            yield
+        finally:
+            for t in tasks:
+                t.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            await platform.close()
+
+
+app = FastAPI(title="GroundTruth API", version=__version__, lifespan=lifespan)
+
+
+def P() -> Platform:
+    return app.state.platform
 
 
 class NewMatch(BaseModel):
@@ -64,17 +109,61 @@ class Ask(BaseModel):
     as_of_t: int | None = None
 
 
-def _session(match_id: str) -> MatchSession:
-    s = sessions.get(match_id)
-    if s is None:
-        raise HTTPException(404, f"no match {match_id}")
-    return s
+# ------------------------------------------------------------------ reading the store
 
+async def _match(match_id: str) -> dict:
+    doc = await P().store.get(match_id, f"match-{match_id}")
+    if doc is None:
+        raise HTTPException(404, f"no match {match_id}")
+    return doc
+
+
+def _cue(d: dict) -> dict:
+    return {k: v for k, v in d.items() if k not in ("id", "kind")}
+
+
+def _visible(cues: list[dict], profile: str, lang: str) -> list[dict]:
+    """What one viewer gets: the shared feed and their profile's, with upgraded cards swapped in."""
+    feed = [c for c in cues if c["lang"] == lang and (c["profile"] == "all" or c["profile"] == profile)]
+    gone = {r for c in feed for r in c.get("replaces", [])}
+    return sorted((c for c in feed if c["cue_id"] not in gone), key=lambda c: c["t_in"])
+
+
+async def _runs(match_id: str) -> list[dict]:
+    return sorted((d["run"] for d in await P().store.query(match_id, "run")), key=lambda r: r["t"])
+
+
+async def _hello(match_id: str) -> dict | None:
+    """Everything a viewer joining now needs before the live stream: nothing past the live edge."""
+    store = P().store
+    doc = await store.get(match_id, f"match-{match_id}")
+    if not doc or not doc.get("meta"):
+        return None
+    live = await store.get(match_id, f"live-{match_id}") or {}
+    t = live.get("t", 0)
+    cues = [_cue(d) for d in await store.query(match_id, "cue") if d["t_out"] >= t - 120_000]
+    board = sorted((e for d in await store.query(match_id, "board") for e in d["entries"]), key=lambda e: e["at_ms"])
+    runs = await _runs(match_id)
+    truth = await store.get(match_id, f"truth-{match_id}") if doc.get("status") == "finished" else None
+    return {
+        "type": "hello", "meta": doc["meta"], "speed": doc.get("speed", 1.0), "delay_s": DELAY_S,
+        "state": live.get("state"), "outage": bool(doc.get("outage")), "cues": cues, "board": board[-400:],
+        "console": sorted((_cue(d) for d in await store.query(match_id, "console")), key=lambda c: c["t"]),
+        "agents": summarize(runs), "runs": runs,
+        # a late joiner still needs the score so far and the timeline's markers
+        "events": [{**d["event"], "derived": d.get("derived")} for d in sorted(await store.query(match_id, "event"),
+                                                                              key=lambda d: d["t"])],
+        "moments": [d["moment"] for d in sorted(await store.query(match_id, "moment"), key=lambda d: d["t"])],
+        "full_time": truth["scorecard"] if truth else None,
+    }
+
+
+# ------------------------------------------------------------------ endpoints
 
 @app.get("/api/health")
-def health() -> dict:
-    return {"ok": True, "version": __version__, "live": sum(not s.finished for s in sessions.values()),
-            "tts": speech is not None}
+async def health() -> dict:
+    live = sum(m.get("status") in LIVE for m in await P().store.matches())
+    return {"ok": True, "version": __version__, "live": live, "tts": speech is not None, "platform": P().describe}
 
 
 @app.get("/api/tts")
@@ -88,7 +177,7 @@ async def tts(text: str = Query(min_length=1, max_length=400), lang: Literal["en
     try:
         audio = await speech.synthesize(text, lang, mode)
     except Exception as e:
-        logging.getLogger("groundtruth").warning("tts failed: %s", e)
+        log.warning("tts failed: %s", e)
         raise HTTPException(502, "text to speech failed") from e
     return Response(audio, media_type="audio/mpeg", headers={"Cache-Control": "public, max-age=86400"})
 
@@ -110,46 +199,64 @@ def console_labels() -> dict:
 async def create_match(req: NewMatch) -> dict:
     if req.home not in LEAGUE or req.away not in LEAGUE or req.home == req.away:
         raise HTTPException(422, "home and away must be two different clubs from /api/league")
-    if sum(not s.finished for s in sessions.values()) >= MAX_LIVE:
+    if sum(m.get("status") in LIVE for m in await P().store.matches()) >= MAX_LIVE:
         raise HTTPException(429, "too many live matches; try again when one ends")
-    match_id = f"live{next(_ids):03d}"
-    s = MatchSession(LEAGUE[req.home], LEAGUE[req.away], seed=req.seed, match_id=match_id,
-                     speed=req.speed, scripted=req.scripted)
-    sessions[match_id] = s
-    _attach_agents(s)
-    s.start()
-    return {"match_id": match_id, "meta": s.meta.model_dump(mode="json")}
+    match_id = f"m{secrets.token_hex(4)}"
+    await P().store.upsert([{"id": f"match-{match_id}", "match_id": match_id, "kind": "match", "status": "starting",
+                             "home": req.home, "away": req.away, "seed": req.seed, "speed": req.speed,
+                             "scripted": req.scripted, "outage": False, "created": time.time()}])
+    await P().bus.publish("control", match_id, [{"type": "start", "match_id": match_id, **req.model_dump()}])
+    return {"match_id": match_id}
 
 
 @app.get("/api/matches")
-def list_matches() -> list[dict]:
-    return [{"match_id": k, "home": s.meta.home.team_id, "away": s.meta.away.team_id,
-             "finished": s.finished, "score": s.engine.score} for k, s in sessions.items()]
+async def list_matches() -> list[dict]:
+    docs = sorted(await P().store.matches(), key=lambda m: -m.get("created", 0))
+    return [{"match_id": m["match_id"], "home": m["home"], "away": m["away"], "status": m.get("status"),
+             "finished": m.get("status") == "finished", "score": m.get("score", [0, 0])} for m in docs[:30]]
 
 
 @app.get("/api/matches/{match_id}")
-def match(match_id: str) -> dict:
-    s = _session(match_id)
-    return {"meta": s.meta.model_dump(mode="json"), "state": s.stats.snapshot(), "finished": s.finished,
-            "speed": s.speed, "console": s.console_log}
+async def match(match_id: str) -> dict:
+    doc = await _match(match_id)
+    live = await P().store.get(match_id, f"live-{match_id}") or {}
+    console = sorted((_cue(d) for d in await P().store.query(match_id, "console")), key=lambda c: c["t"])
+    return {"meta": doc.get("meta"), "status": doc.get("status"), "finished": doc.get("status") == "finished",
+            "speed": doc.get("speed"), "state": live.get("state"), "console": console}
+
+
+@app.get("/api/matches/{match_id}/connect")
+async def connect(match_id: str) -> dict:
+    """Where to stream from: a Web PubSub URL with a token for this match's group, or this server."""
+    await _match(match_id)
+    return {"hello": await _hello(match_id), "url": await P().broadcaster.client_url(match_id)}
+
+
+async def _snapshots(match_id: str) -> list[dict]:
+    return sorted(await P().store.query(match_id, "snapshot"), key=lambda s: s["t"])
 
 
 @app.get("/api/matches/{match_id}/players")
-def players(match_id: str) -> list[dict]:
-    return [p.view() for p in _session(match_id).stats.players.values()]
+async def players(match_id: str) -> list[dict]:
+    snaps = await _snapshots(match_id)
+    return list(snaps[-1]["players"].values()) if snaps else []
 
 
 @app.get("/api/matches/{match_id}/series/{metric}")
-def series(match_id: str, metric: str) -> dict:
-    s = _session(match_id)
-    if metric not in s.stats.series:
+async def series(match_id: str, metric: str) -> dict:
+    out: dict[str, list] = {}
+    for s in await _snapshots(match_id):
+        for team, v in s.get("series", {}).get(metric, {}).items():
+            out.setdefault(team, []).append([s["t"], v])
+    if not out:
         raise HTTPException(404, f"no series {metric}")
-    return {team: [[t, v] for t, v in pts] for team, pts in s.stats.series[metric].items()}
+    return out
 
 
 @app.get("/api/matches/{match_id}/cues")
-def cues(match_id: str, profile: str = "all", lang: str = "en") -> list[dict]:
-    return [c.model_dump(mode="json") for c in _session(match_id).producer.sheet(profile, lang)]
+async def cues(match_id: str, profile: str = "all", lang: str = "en") -> list[dict]:
+    docs = [_cue(d) for d in await P().store.query(match_id, "cue")]
+    return sorted((c for c in docs if c["profile"] == profile and c["lang"] == lang), key=lambda c: c["t_in"])
 
 
 @app.get("/api/schema/cue")
@@ -160,52 +267,88 @@ def cue_schema() -> dict:
 
 
 @app.get("/api/matches/{match_id}/overlays")
-def overlays(match_id: str, profile: Literal["all", "analyst", "casual"] = "analyst", lang: str = "en",
-             since_t: int = 0) -> dict:
+async def overlays(match_id: str, profile: Literal["all", "analyst", "casual"] = "analyst", lang: str = "en",
+                   since_t: int = 0) -> dict:
     """The overlay timeline one viewer gets: shared cues plus their profile's, upgrades swapped in."""
-    s = _session(match_id)
+    await _match(match_id)
+    live = await P().store.get(match_id, f"live-{match_id}") or {}
+    docs = [_cue(d) for d in await P().store.query(match_id, "cue")]
     return {"schema_version": SCHEMA_VERSION, "match_id": match_id, "profile": profile, "lang": lang,
-            "t": s.stats.t, "cues": [c.model_dump(mode="json") for c in s.producer.visible(profile, lang)
-                                     if c.t_out >= since_t]}
+            "t": live.get("t", 0), "cues": [c for c in _visible(docs, profile, lang) if c["t_out"] >= since_t]}
+
+
+async def _truth(match_id: str) -> dict:
+    doc = await _match(match_id)
+    truth = await P().store.get(match_id, f"truth-{match_id}")
+    if doc.get("status") != "finished" or truth is None:
+        raise HTTPException(409, "the truth log and the scorecard open at full time")
+    return truth
 
 
 @app.get("/api/matches/{match_id}/scorecard")
-def match_scorecard(match_id: str) -> dict:
+async def match_scorecard(match_id: str) -> dict:
     """What the system said against the answer key. Like the truth log, it opens at full time."""
-    s = _session(match_id)
-    if not s.finished:
-        raise HTTPException(409, "the scorecard opens at full time")
-    return s.full_time_card or s.scorecard()
+    return (await _truth(match_id))["scorecard"]
+
+
+@app.get("/api/matches/{match_id}/truth")
+async def truth(match_id: str) -> list[dict]:
+    """The answer key. Hidden until full time, so nothing downstream can peek."""
+    return (await _truth(match_id))["truth"]
 
 
 @app.get("/api/matches/{match_id}/agents")
-def match_agents(match_id: str) -> dict:
-    s = _session(match_id)
-    return {"runs": s.agent_runs, "summary": summarize(s.agent_runs), "outage": s.outage, "guard": GUARD.view()}
+async def match_agents(match_id: str) -> dict:
+    doc = await _match(match_id)
+    runs = await _runs(match_id)
+    return {"runs": runs, "summary": summarize(runs), "outage": bool(doc.get("outage")), "guard": GUARD.view()}
 
 
 @app.post("/api/matches/{match_id}/agents/outage")
-def set_outage(match_id: str, req: Outage) -> dict:
+async def set_outage(match_id: str, req: Outage) -> dict:
     """Simulate the model service going down: every card falls back to its template, live."""
-    s = _session(match_id)
-    s.outage = req.on
-    s.publish({"type": "outage", "on": req.on})
-    return {"ok": True, "outage": s.outage}
+    doc = await _match(match_id)
+    await P().store.upsert([{**doc, "outage": req.on}])
+    await P().bus.publish("control", match_id, [{"type": "outage", "match_id": match_id, "on": req.on}])
+    await P().broadcaster.send(match_id, [{"type": "outage", "on": req.on}])
+    return {"ok": True, "outage": req.on}
+
+
+def _desk():
+    if app.state.desk is None:
+        from ..agents.clients import make_clients
+        from ..agents.desk import Desk
+
+        app.state.desk = Desk(make_clients()[1])
+    return app.state.desk
+
+
+def _agents_on() -> bool:
+    if os.environ.get("GROUNDTRUTH_AGENTS", "1") == "0":
+        return False
+    try:
+        import agent_framework  # noqa: F401
+    except ImportError:
+        return False
+    return True
 
 
 @app.post("/api/matches/{match_id}/catchup")
 async def catch_up(match_id: str, req: CatchUp) -> dict:
     """A summary of the match up to the viewer's playhead, never beyond it."""
+    view = await StoreView.load(P().store, match_id)
+    if view is None:
+        raise HTTPException(409, "the match has not kicked off")
+    as_of = min(req.as_of_t if req.as_of_t is not None else view.t, view.t)
     from ..agents.desk import brief, fallback_recap
 
-    s = _session(match_id)
-    as_of = min(req.as_of_t if req.as_of_t is not None else s.stats.t, s.stats.t)
-    desk = getattr(s, "desk", None)
-    refused = "simulated model outage" if s.outage else (GUARD.admit() if desk else "agents are off")
+    refused = ("simulated model outage" if view.doc.get("outage") else
+               (GUARD.admit() if _agents_on() else "agents are off"))
     if refused:
-        return {**fallback_recap(brief(s, as_of), req.lang), "verified": True, "fallback": True,
-                "problems": [refused], "minute": brief(s, as_of)["minute"]}
-    out = await desk.recap(as_of, req.lang, req.mode)
+        b = brief(view, as_of)
+        return {**fallback_recap(b, req.lang), "verified": True, "fallback": True, "problems": [refused],
+                "minute": b["minute"]}
+    out = await _desk().recap(view, as_of, req.lang, req.mode)
     GUARD.spend(out.get("tokens_in", 0) + out.get("tokens_out", 0))
     return out
 
@@ -213,77 +356,70 @@ async def catch_up(match_id: str, req: CatchUp) -> dict:
 @app.post("/api/matches/{match_id}/ask")
 async def ask(match_id: str, req: Ask) -> dict:
     """A question about the match so far, answered by the desk agent from the match up to the playhead."""
-    s = _session(match_id)
-    desk = getattr(s, "desk", None)
-    if desk is None or s.outage:
+    view = await StoreView.load(P().store, match_id)
+    if view is None:
+        raise HTTPException(409, "the match has not kicked off")
+    if view.doc.get("outage") or not _agents_on():
         raise HTTPException(503, "the desk is offline")
     refused = GUARD.admit()
     if refused:
         raise HTTPException(429, refused)
-    as_of = min(req.as_of_t if req.as_of_t is not None else s.stats.t, s.stats.t)
-    out = await desk.ask(req.question, as_of, req.lang)
+    as_of = min(req.as_of_t if req.as_of_t is not None else view.t, view.t)
+    out = await _desk().ask(view, req.question, as_of, req.lang)
     GUARD.spend(out.get("tokens_in", 0) + out.get("tokens_out", 0))
     return out
 
 
 @app.get("/api/agents")
-def agents_overview() -> dict:
-    """Agent performance across every match on this server."""
-    runs = [r for s in sessions.values() for r in s.agent_runs]
-    return {"summary": summarize(runs), "guard": GUARD.view(), "matches": len(sessions)}
-
-
-@app.get("/api/matches/{match_id}/truth")
-def truth(match_id: str) -> list[dict]:
-    """The answer key. Hidden until full time, so nothing downstream can peek."""
-    s = _session(match_id)
-    if not s.finished:
-        raise HTTPException(409, "the truth log opens at full time")
-    return [t.model_dump(mode="json") for t in s.engine.truth]
+async def agents_overview() -> dict:
+    """Agent performance across every match in the store."""
+    docs = await P().store.matches()
+    runs = [r for m in docs for r in await _runs(m["match_id"])]
+    return {"summary": summarize(runs), "guard": GUARD.view(), "matches": len(docs)}
 
 
 @app.post("/api/matches/{match_id}/console")
-def console(match_id: str, req: Console) -> dict:
-    s = _session(match_id)
-    if req.team_id not in (s.meta.home.team_id, s.meta.away.team_id):
+async def console(match_id: str, req: Console) -> dict:
+    doc = await _match(match_id)
+    if req.team_id not in (doc["home"], doc["away"]):
         raise HTTPException(422, "team_id must be one of the two teams in this match")
-    if s.finished:
+    if doc.get("status") not in LIVE:
         raise HTTPException(409, "the match is over")
-    s.intervene(req.team_id, req.label)
-    return {"ok": True, "console": s.console_log[-1]}
+    await P().bus.publish("control", match_id, [{"type": "console", "match_id": match_id, **req.model_dump()}])
+    return {"ok": True, "console": req.model_dump()}
 
 
 @app.post("/api/matches/{match_id}/speed")
-def set_speed(match_id: str, req: Speed) -> dict:
-    s = _session(match_id)
-    s.speed = req.speed
-    s.publish({"type": "speed", "speed": s.speed})
-    return {"ok": True, "speed": s.speed}
+async def set_speed(match_id: str, req: Speed) -> dict:
+    doc = await _match(match_id)
+    await P().store.upsert([{**doc, "speed": req.speed}])
+    await P().bus.publish("control", match_id, [{"type": "speed", "match_id": match_id, "speed": req.speed}])
+    return {"ok": True, "speed": req.speed}
 
 
 @app.websocket("/api/matches/{match_id}/stream")
 async def stream(ws: WebSocket, match_id: str) -> None:
-    s = sessions.get(match_id)
-    if s is None:
+    """The live stream from this process (local mode). On Azure, viewers use Web PubSub via /connect."""
+    b = P().broadcaster
+    if not b.local:
+        await ws.close(code=4400)
+        return
+    if await P().store.get(match_id, f"match-{match_id}") is None:
         await ws.close(code=4404)
         return
     await ws.accept()
-    q = s.subscribe()
+    q = b.subscribe(match_id)  # before the hello, so nothing falls between the two
     try:
-        recent = [c for feed in s.producer.schedule.values() for c in feed if c.t_out >= s.stats.t - 120_000]
-        b = getattr(s, "board", None)
-        board = sorted((e for entries in b.items.values() for e in entries), key=lambda e: e["at_ms"]) if b else []
-        await ws.send_json({"type": "hello", "meta": s.meta.model_dump(mode="json"), "speed": s.speed,
-                            "delay_s": DELAY_S, "state": s.stats.snapshot(), "outage": s.outage,
-                            "cues": [c.model_dump(mode="json") for c in recent], "board": board[-300:],
-                            "console": s.console_log, "agents": summarize(s.agent_runs), "runs": s.agent_runs,
-                            # a late joiner still needs the score so far and the timeline's markers
-                            "events": [{**e.model_dump(mode="json", exclude_none=True),
-                                        "derived": s.stats.derived.get(e.event_id)} for e in s.key_events],
-                            "moments": [m.model_dump(mode="json") for m in s.stats.moments],
-                            "full_time": s.full_time_card})
-        if s.last_frame:
-            await ws.send_json(s.last_frame)
+        hello = None
+        for _ in range(150):
+            hello = await _hello(match_id)
+            if hello:
+                break
+            await asyncio.sleep(0.1)
+        if hello is None:
+            await ws.close(code=4408)
+            return
+        await ws.send_json(hello)
         while True:
             try:
                 msg = await asyncio.wait_for(q.get(), timeout=15.0)
@@ -291,34 +427,20 @@ async def stream(ws: WebSocket, match_id: str) -> None:
                 await ws.send_json({"type": "ping"})
                 continue
             await ws.send_json(msg)
-            if msg["type"] == "full_time":
+            if any(m["type"] == "full_time" for m in msg.get("messages", [])):
                 break
     except WebSocketDisconnect:
         pass
     finally:
-        s.unsubscribe(q)
-
-
-def _attach_agents(s: MatchSession) -> None:
-    """Agents explain tactical shifts; without them the template cues still air."""
-    if os.environ.get("GROUNDTRUTH_AGENTS", "1") == "0":
-        return
-    try:
-        from ..agents.hook import attach_agents
-    except ImportError:  # the agents extra is not installed
-        return
-    try:
-        attach_agents(s, budget_s=float(os.environ.get("GROUNDTRUTH_AGENT_BUDGET_S", "20")))
-    except Exception:  # a misconfigured model must not stop the match
-        logging.getLogger("groundtruth").exception("agents not attached")
+        b.unsubscribe(match_id, q)
 
 
 try:  # the match's tools over MCP, for any MCP client
     from .mcp_server import mount_mcp
 
-    mount_mcp(app, sessions)
+    _mcp = mount_mcp(app, P)
 except Exception:  # not installed, or an SDK change: the match server runs without it
-    logging.getLogger("groundtruth").warning("mcp is off", exc_info=True)
+    log.warning("mcp is off", exc_info=True)
 
 _web = os.environ.get("GROUNDTRUTH_WEB_DIR")
 if _web and Path(_web).is_dir():  # the built web app, served after every /api route
@@ -326,10 +448,10 @@ if _web and Path(_web).is_dir():  # the built web app, served after every /api r
 
 
 if os.environ.get("APPLICATIONINSIGHTS_CONNECTION_STRING"):
-    # Traces from every agent run go to Application Insights, where Foundry's tracing view reads them.
+    # Traces from every role go to Application Insights, where Foundry's tracing view reads the agents'.
     try:
         from microsoft.opentelemetry import use_microsoft_opentelemetry
 
         use_microsoft_opentelemetry(enable_azure_monitor=True)
     except Exception:
-        logging.getLogger("groundtruth").exception("telemetry not configured")
+        log.exception("telemetry not configured")

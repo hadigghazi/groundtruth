@@ -2,9 +2,20 @@
 
 from __future__ import annotations
 
+import time
+
 from fastapi.testclient import TestClient
 
 from groundtruth.api.app import app
+
+
+def _kicked_off(client, mid, timeout=10.0):
+    end = time.monotonic() + timeout
+    while time.monotonic() < end:
+        if client.get(f"/api/matches/{mid}").json().get("meta"):
+            return
+        time.sleep(0.05)
+    raise AssertionError(f"{mid} never kicked off")
 
 
 def test_health_and_league():
@@ -23,7 +34,8 @@ def test_live_match_streams_and_takes_console_changes():
             assert ws.receive_json()["type"] == "hello"
             kinds = set()
             for _ in range(5000):
-                kinds.add(ws.receive_json()["type"])
+                msg = ws.receive_json()
+                kinds |= {m["type"] for m in msg.get("messages", [msg])}  # the stream arrives in batches
                 if {"frame", "event", "state"} <= kinds:
                     break
             assert {"frame", "event", "state"} <= kinds
@@ -61,6 +73,7 @@ def test_cue_schema_is_versioned_and_stable():
 def test_overlays_scorecard_and_agent_metrics():
     with TestClient(app) as client:
         mid = client.post("/api/matches", json={"home": "HLB", "away": "STM", "seed": 6, "speed": 1}).json()["match_id"]
+        _kicked_off(client, mid)
         tl = client.get(f"/api/matches/{mid}/overlays", params={"profile": "casual", "lang": "es"}).json()
         assert tl["schema_version"] == "1.2" and tl["profile"] == "casual" and isinstance(tl["cues"], list)
         assert client.get(f"/api/matches/{mid}/scorecard").status_code == 409
@@ -81,3 +94,14 @@ def test_mcp_lists_the_match_tools():
         assert r.status_code == 200, r.text
         for name in ("list_matches", "match_brief", "team_window", "player_report", "key_moments", "scorecard"):
             assert name in r.text
+
+
+def test_the_api_reports_its_platform_and_streams_from_the_store():
+    with TestClient(app) as client:
+        health = client.get("/api/health").json()
+        assert health["platform"]["bus"] == "MemoryBus" and set(health["platform"]["roles"]) == {"simulator", "worker", "api"}
+        mid = client.post("/api/matches", json={"home": "KBY", "away": "STM", "seed": 9, "speed": 2}).json()["match_id"]
+        _kicked_off(client, mid)
+        c = client.get(f"/api/matches/{mid}/connect").json()
+        assert c["url"] is None and c["hello"]["meta"]["match_id"] == mid  # local mode: stream from this server
+        assert client.get("/api/matches/nope/connect").status_code == 404

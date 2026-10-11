@@ -4,8 +4,10 @@ A viewer watches on a delay, and may have rewound. Everything here is answered a
 their play time: the per-minute snapshots, the moments and the verified insights up to
 then, and stats windows that count back from then. Nothing later can leak in.
 
-The same read-only functions serve the desk agents (as Agent Framework tools) and
-outside clients (as MCP tools, see api/mcp_server.py). Every number an answer uses must
+Everything reads a *view* of the match: a worker's live session, or (in the API, which
+holds no match in memory) the documents in the store. The same read-only functions serve
+the desk agents (as Agent Framework tools) and outside clients (as MCP tools, see
+api/mcp_server.py). Every number an answer uses must
 come from the brief or a tool result, checked in code like everything else on screen;
 when a model is unavailable or fails the checks, a code-written recap stands in.
 """
@@ -67,9 +69,9 @@ FALLBACK = {
 
 # ------------------------------------------------------------------ the briefs
 
-def brief(session, as_of: int) -> dict:
+def brief(view, as_of: int) -> dict:
     """The match up to play time `as_of`: score, totals, key moments, verified insights."""
-    meta, snap = session.meta, session.as_of(as_of)
+    meta, snap = view.meta, view.as_of(as_of)
     teams = (snap or {}).get("teams", {})
     minute = ((snap or {}).get("clock_ms", 0)) // MINUTE
     out_teams = {}
@@ -82,14 +84,15 @@ def brief(session, as_of: int) -> dict:
     total = sum(poss.values()) or 1
     for tid in out_teams:
         out_teams[tid]["possession"] = round(poss[tid] / total, 3)
-    moments = [{"minute": m.clock_ms // MINUTE + 1, "kind": m.kind, "team": session.stats.team_name(m.team_id),
-                "what": m.headline} for m in session.stats.moments if m.t <= as_of and m.kind in KEY_KINDS]
-    goals = [{"minute": m.clock_ms // MINUTE + 1, "team": session.stats.team_name(m.team_id),
-              "player": session.stats.name(m.player_id)} for m in session.stats.moments if m.t <= as_of and m.kind == "goal"]
-    insights = [{"minute": r["minute"] + 1, "team": session.stats.team_name(r["team_id"]), "cause": r["cause"],
-                 "headline": r.get("headline", "")} for r in session.agent_results.values() if r["t"] <= as_of]
+    seen = [m for m in view.moments if m.t <= as_of]
+    moments = [{"minute": m.clock_ms // MINUTE + 1, "kind": m.kind, "team": view.team_name(m.team_id),
+                "what": m.headline} for m in seen if m.kind in KEY_KINDS]
+    goals = [{"minute": m.clock_ms // MINUTE + 1, "team": view.team_name(m.team_id), "player": view.name(m.player_id)}
+             for m in seen if m.kind == "goal"]
+    insights = [{"minute": r["minute"] + 1, "team": view.team_name(r["team_id"]), "cause": r["cause"],
+                 "headline": r.get("headline", "")} for r in view.agent_results.values() if r["t"] <= as_of]
     return {"minute": minute, "home": meta.home.team_id, "away": meta.away.team_id, "teams": out_teams,
-            "goals": goals, "moments": moments[-14:], "insights": insights[-6:]}
+            "goals": goals, "moments": moments[-14:], "insights": sorted(insights, key=lambda i: i["minute"])[-6:]}
 
 
 def fallback_recap(b: dict, lang: str) -> dict:
@@ -105,22 +108,20 @@ def fallback_recap(b: dict, lang: str) -> dict:
 
 # ------------------------------------------------------------------ the tools
 
-def desk_functions(session):
-    """Plain read-only functions over a live session, as of AS_OF (or the live edge)."""
-    stats = session.stats
+def desk_functions(view):
+    """Plain read-only functions over a view of the match, as of AS_OF (or the live edge)."""
 
     def now() -> int:
-        return min(AS_OF.get() or stats.t, stats.t)
+        return min(AS_OF.get() or view.t, view.t)
 
-    def team_window(team_id: str, minutes_back_start: int, minutes_back_end: int = 0) -> dict:
-        """Metrics for one team over a stretch of play, counted back from the viewer's minute."""
-        lo = now() - max(minutes_back_start, minutes_back_end + 1) * MINUTE
-        hi = now() - minutes_back_end * MINUTE
-        return {k: round(v, 3) for k, v in stats.window_metrics(lo, hi)[team_id].items() if v is not None}
+    def team_window(team_id: str, minutes_before_now: int = 0) -> dict:
+        """One team's pressing, shape, tempo and directness: the last 10 minutes and the 20 before them,
+        ending a number of minutes before the viewer's minute (0 means up to now)."""
+        return view.windows_at(team_id, now() - max(0, minutes_before_now) * MINUTE)
 
     def player_report(team_id: str) -> list[dict]:
         """Each player's running, passing and shooting so far: km, top speed, passes, accuracy, shots, goals."""
-        snap = session.as_of(now()) or {"players": {}}
+        snap = view.as_of(now()) or {"players": {}}
         rows = [{"player": p["name"], "km": round(p["km"], 2), "top_kmh": round(p["top_kmh"], 1), "passes": p["passes"],
                  "pass_accuracy": p["pass_accuracy"], "shots": p["shots"], "goals": p["goals"]}
                 for p in snap["players"].values() if p["team_id"] == team_id]
@@ -129,8 +130,8 @@ def desk_functions(session):
     def key_moments(kind: str = "") -> list[dict]:
         """Goals, cards, big chances, tactical shifts and substitutions so far; filter by kind if given."""
         t = now()
-        return [{"minute": m.clock_ms // MINUTE + 1, "kind": m.kind, "team": stats.team_name(m.team_id), "what": m.headline}
-                for m in stats.moments if m.t <= t and m.kind in KEY_KINDS and (not kind or m.kind == kind)]
+        return [{"minute": m.clock_ms // MINUTE + 1, "kind": m.kind, "team": view.team_name(m.team_id), "what": m.headline}
+                for m in view.moments if m.t <= t and m.kind in KEY_KINDS and (not kind or m.kind == kind)]
 
     return {"team_window": team_window, "player_report": player_report, "key_moments": key_moments}
 
@@ -144,26 +145,29 @@ def _check(text: str, lang: str, allowed: list[float], max_len: int) -> list[str
 
 
 class Desk:
-    def __init__(self, session, client):
-        self.session = session
-        self.record: list[float] = []
-        fns = desk_functions(session)
+    """One desk per API process; each request brings the view it answers from."""
 
+    def __init__(self, client):
+        self.client = client
+        self.recap_agent = Agent(client=client, name="CatchMeUp", instructions=RECAP)
+
+    def _ask_agent(self, view, record: list[float]) -> Agent:
         def keep(f):  # every number a tool returns becomes quotable
             @functools.wraps(f)
             def wrapped(*a, **k):
                 out = f(*a, **k)
-                self.record.extend(allowed_numbers({"teams": {}, "x": out}))
+                record.extend(allowed_numbers({"teams": {}, "x": out}))
                 return out
             return tool(approval_mode="never_require")(wrapped)
 
-        self.ask_agent = Agent(client=client, name="AnalystDesk", instructions=ASK, tools=[keep(f) for f in fns.values()])
-        self.recap_agent = Agent(client=client, name="CatchMeUp", instructions=RECAP)
+        return Agent(client=self.client, name="AnalystDesk", instructions=ASK,
+                     tools=[keep(f) for f in desk_functions(view).values()])
 
-    async def _run(self, agent: Agent, model, payload: dict, allowed: list[float], lang: str, max_len: int, text_of):
+    async def _run(self, agent: Agent, model, payload: dict, allowed: list[float], lang: str, max_len: int, text_of,
+                   record: list[float] | None = None):
         """One try, then one retry with the problems listed. Returns (parsed or None, problems, usage, ms)."""
         t0, problems, used = time.perf_counter(), [], {}
-        for attempt in (1, 2):
+        for _attempt in (1, 2):
             if problems:
                 payload = {**payload, "your_previous_answer_was_rejected_because": problems}
             try:
@@ -171,16 +175,16 @@ class Desk:
             except Exception as e:
                 return None, [f"{type(e).__name__}: {e}"], used, round(1000 * (time.perf_counter() - t0))
             out, used = _parse(model, resp), usage(resp)
-            problems = ["the reply did not match the format"] if out is None else \
-                _check(text_of(out), lang, allowed + self.record, max_len)
+            problems = (["the reply did not match the format"] if out is None
+                        else _check(text_of(out), lang, allowed + (record or []), max_len))
             if not problems:
                 return out, [], used, round(1000 * (time.perf_counter() - t0))
         return None, problems, used, round(1000 * (time.perf_counter() - t0))
 
-    async def recap(self, as_of: int, lang: str, mode: str) -> dict:
+    async def recap(self, view, as_of: int, lang: str, mode: str) -> dict:
         token = AS_OF.set(as_of)
         try:
-            b = brief(self.session, as_of)
+            b = brief(view, as_of)
             payload = {"task": "recap", "lang": lang, "language": LANG_NAMES[lang], "viewer": mode, "pack": b}
             out, problems, used, ms = await self._run(self.recap_agent, Recap, payload, allowed_numbers({"teams": {}, "x": b}),
                                                       lang, 500, lambda r: f"{r.headline} {r.body}")
@@ -192,17 +196,18 @@ class Desk:
         return {"headline": out.headline, "body": out.body, "verified": True, "fallback": False, "minute": b["minute"],
                 "ms": ms, **used}
 
-    async def ask(self, question: str, as_of: int, lang: str) -> dict:
+    async def ask(self, view, question: str, as_of: int, lang: str) -> dict:
         token = AS_OF.set(as_of)
+        record: list[float] = []
         try:
-            b = brief(self.session, as_of)
+            b = brief(view, as_of)
             payload = {"task": "ask", "lang": lang, "language": LANG_NAMES[lang], "question": question[:300], "brief": b}
-            out, problems, used, ms = await self._run(self.ask_agent, Answer, payload, allowed_numbers({"teams": {}, "x": b}),
-                                                      lang, 700, lambda a: a.answer)
+            out, problems, used, ms = await self._run(self._ask_agent(view, record), Answer, payload,
+                                                      allowed_numbers({"teams": {}, "x": b}), lang, 700,
+                                                      lambda a: a.answer, record)
         finally:
             AS_OF.reset(token)
         if out is None:
             return {"answer": None, "verified": False, "problems": problems, "minute": b["minute"], "ms": ms, **used}
         return {"answer": out.answer, "out_of_scope": out.out_of_scope, "verified": True, "minute": b["minute"],
                 "ms": ms, **used}
-

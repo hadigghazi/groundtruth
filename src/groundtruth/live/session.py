@@ -1,77 +1,94 @@
-"""One live match: engine -> stats -> cues, paced to the wall clock, fanned out to viewers.
+"""One match inside a worker: stats, captions, cues and agents, from the simulator's ticks.
 
-The session runs the five stages in order every tick and never waits on an
-LLM: every moment's template card goes on air at once, and agents attach
-through hooks that upgrade those cards later.
+The session never sees the engine or its truth log: only what arrives on the bus, as a
+real data provider's feed would. It never waits on a model either: every moment's
+template card goes on air at once, and agents attach through hooks that upgrade those
+cards later.
+
+Everything it produces goes two ways, collected here and sent by the worker in batches:
+live messages for viewers (the outbox) and documents for the store.
 """
 
 from __future__ import annotations
 
 import asyncio
-import math
 import time
 from collections.abc import Awaitable, Callable
 
 from ..agents.guard import summarize
-from ..evaluation.scorecard import scorecard
-from ..league import Club
 from ..render.captions import CaptionWriter
 from ..render.cues import AGENT_KINDS, CueBuilder
 from ..render.producer import Producer
 from ..render.templates import LANGS
-from ..schema import Cue, Moment
-from ..sim.engine import MatchEngine
-from ..stats.engine import StatsEngine
+from ..schema import Cue, Event, MatchMeta, Moment
+from ..sim.engine import Frame
+from ..stats.engine import BASELINE, MINUTE, RECENT, StatsEngine
 
 MomentHook = Callable[["MatchSession", Moment, list[Cue]], Awaitable[None]]
-MAX_FRAMES_PER_SECOND = 25
+FRAME_GAP_S = 0.04  # viewers get at most 25 frames a second; they interpolate
+KEY_EVENTS = ("goal", "card", "shot")
+
+
+def _r(x):
+    if isinstance(x, float):
+        return round(x, 3)
+    if isinstance(x, dict):
+        return {k: _r(v) for k, v in x.items() if v is not None}
+    return x
 
 
 class MatchSession:
-    def __init__(self, home: Club, away: Club, *, seed: int, match_id: str, speed: float = 1.0,
-                 scripted: bool = True, langs: tuple[str, ...] = LANGS):
-        self.match_id = match_id
-        self.engine = MatchEngine(home, away, seed=seed, match_id=match_id, scripted=scripted)
-        self.meta = self.engine.meta()
-        self.stats = StatsEngine(self.meta)
+    def __init__(self, meta: MatchMeta, *, langs: tuple[str, ...] = LANGS):
+        self.match_id = meta.match_id
+        self.meta = meta
+        self.stats = StatsEngine(meta)
         self.builder = CueBuilder(self.stats, langs)
         self.captions = CaptionWriter(self.stats, langs)
         self.producer = Producer()
-        self.speed = speed  # 0 = as fast as possible
-        self.subscribers: set[asyncio.Queue] = set()
         self.hooks: list[MomentHook] = []
-        self.console_log: list[dict] = []
-        self.started = time.time()
-        self.task: asyncio.Task | None = None
-        self.last_frame: dict | None = None
         self.outage = False  # the director can simulate a model outage
         self.agent_runs: list[dict] = []
-        self.agent_results: dict[str, dict] = {}  # moment_id -> the verified insight's team and cause
-        self.truth_t: list[int] = []  # play time at which each truth-log change took effect
-        self.full_time_card: dict | None = None
+        self.agent_results: dict[str, dict] = {}  # moment_id -> the verified insight
+        self.done_moments: set[str] = set()  # moments a previous owner already explained (replay)
+        self.minutes: list[dict] = []  # one snapshot a minute, for answers as of a viewer's minute
+        self.finished = False
+        self.outbox: list[dict] = []
+        self._docs: dict[str, dict] = {}
+        self._boards: dict[str, list[dict]] = {}
         self._tasks: set[asyncio.Task] = set()
-        self.key_events: list = []  # goals, cards and shots, replayed to anyone who joins late
-        # one snapshot of the totals per minute of play, so questions about "the match so far"
-        # can be answered as of a viewer's delayed playhead, never from later play
-        self.minutes: list[dict] = []
         self._next_minute = 0
+        self._ticks = 0
+        self._frame_wall = 0.0
 
-    # ------------------------------------------------------------ fan-out
+    # ------------------------------------------------------------ outputs
 
-    def subscribe(self) -> asyncio.Queue:
-        q: asyncio.Queue = asyncio.Queue(maxsize=2000)
-        self.subscribers.add(q)
-        return q
-
-    def unsubscribe(self, q: asyncio.Queue) -> None:
-        self.subscribers.discard(q)
+    def doc(self, kind: str, doc_id: str, body: dict) -> None:
+        self._docs[doc_id] = {"id": doc_id, "match_id": self.match_id, "kind": kind, **body}
 
     def publish(self, msg: dict) -> None:
-        for q in list(self.subscribers):
-            try:
-                q.put_nowait(msg)
-            except asyncio.QueueFull:  # a slow viewer loses messages, never the match
-                pass
+        self.outbox.append(msg)
+        kind = msg["type"]
+        if kind == "cue":
+            c = msg["cue"]
+            self.doc("cue", c["cue_id"], c)
+        elif kind == "moment":
+            self.doc("moment", f"moment-{msg['moment']['moment_id']}", {"moment_id": msg["moment"]["moment_id"],
+                                                                         "t": msg["moment"]["t"], "moment": msg["moment"]})
+        elif kind == "board":
+            e = msg["entry"]
+            entries = self._boards.setdefault(e["moment_id"], [])
+            entries.append(e)
+            self.doc("board", f"board-{e['moment_id']}", {"moment_id": e["moment_id"], "entries": entries})
+        elif kind == "agent_run":
+            r = msg["run"]
+            self.doc("run", f"run-{r['moment_id']}", {"moment_id": r["moment_id"], "t": r["t"], "run": r})
+        elif kind == "state":
+            self.doc("live", f"live-{self.match_id}", {"t": self.stats.t, "state": msg["state"]})
+
+    def drain(self) -> tuple[list[dict], list[dict]]:
+        msgs, docs = self.outbox, list(self._docs.values())
+        self.outbox, self._docs = [], {}
+        return msgs, docs
 
     def place_cue(self, cue: Cue) -> Cue | None:
         placed = self.producer.place(cue)
@@ -91,11 +108,32 @@ class MatchSession:
         self.agent_runs.append(run)
         self.publish({"type": "agent_run", "run": run, "summary": summarize(self.agent_runs)})
 
-    def _minute_snapshot(self) -> dict:
-        st = self.stats
-        return {"t": st.t, "period": st.period, "clock_ms": st.clock_ms,
-                "teams": {tid: st.teams[tid].view() for tid in st.team_ids},
-                "players": {pid: p.view() for pid, p in st.players.items() if p.km > 0}}
+    def save_result(self, moment_id: str, result: dict) -> None:
+        self.agent_results[moment_id] = result
+        self.doc("result", f"result-{moment_id}", {"moment_id": moment_id, **result})
+
+    # ------------------------------------------------------------ the view the desk reads
+
+    @property
+    def t(self) -> int:
+        return self.stats.t
+
+    @property
+    def moments(self) -> list[Moment]:
+        return self.stats.moments
+
+    def team_name(self, tid: str | None) -> str:
+        return self.stats.team_name(tid)
+
+    def name(self, pid: str | None) -> str:
+        return self.stats.name(pid)
+
+    def window(self, tid: str, lo: int, hi: int) -> dict:
+        return {k: round(v, 3) for k, v in self.stats.window_metrics(lo, hi)[tid].items() if v is not None}
+
+    def windows_at(self, tid: str, t: int) -> dict:
+        return {"last_10_min": self.window(tid, t - RECENT, t),
+                "previous_20_min": self.window(tid, t - RECENT - BASELINE, t - RECENT)}
 
     def as_of(self, t: int) -> dict | None:
         """The latest per-minute snapshot at or before play time t."""
@@ -106,80 +144,58 @@ class MatchSession:
             best = snap
         return best
 
-    def scorecard(self) -> dict:
-        changes = [{"t": t, "team_id": c.team_id, "label": c.label, "source": c.source,
-                    "period": c.period, "clock_ms": c.clock_ms} for t, c in zip(self.truth_t, self.engine.truth)]
-        return scorecard(changes, self.stats.moments, self.agent_results)
+    def _minute_snapshot(self) -> dict:
+        st = self.stats
+        now = st.t
+        return {"t": now, "period": st.period, "clock_ms": st.clock_ms,
+                "teams": {tid: st.teams[tid].view() for tid in st.team_ids},
+                "players": {pid: p.view() for pid, p in st.players.items() if p.km > 0},
+                "windows": {"recent": _r(st.window_metrics(now - RECENT, now)),
+                            "baseline": _r(st.window_metrics(now - RECENT - BASELINE, now - RECENT))},
+                "series": {k: {tid: pts[-1][1] for tid, pts in st.series[k].items() if pts}
+                           for k in ("threat",)}}
 
-    # ------------------------------------------------------------ control
+    # ------------------------------------------------------------ the stages, once per tick
 
-    def intervene(self, team_id: str, label: str) -> None:
-        self.engine.intervene(team_id, label)
-        entry = {"t": self.stats.t, "period": self.engine.period, "clock_ms": self.engine.clock_ms,
-                 "team_id": team_id, "label": label}
-        self.console_log.append(entry)
-        self.publish({"type": "console", **entry})
-
-    @property
-    def finished(self) -> bool:
-        return self.engine.finished
-
-    # ------------------------------------------------------------ the loop
-
-    async def run(self) -> None:
-        wall0 = time.perf_counter()
-        ticks = 0
-        stride = 1
-        for events, frame in self.engine.run():
-            while len(self.truth_t) < len(self.engine.truth):
-                self.truth_t.append(self.stats.t)
-            moments = self.stats.feed_frame(frame)
-            for ev in events:
-                moments += self.stats.feed_event(ev)
-                if ev.type in ("goal", "card", "shot"):
-                    self.key_events.append(ev)
-                # the event first, so a viewer has it before any cue that cites it
-                self.publish({"type": "event", "event": ev.model_dump(mode="json", exclude_none=True),
-                              "derived": self.stats.derived.get(ev.event_id)})
-                for cue in self.captions.from_event(ev):
-                    self.place_cue(cue)
-            for m in moments:
-                self._on_moment(m)
-            if self.speed > 0:
-                stride = max(1, math.ceil(10 * self.speed / MAX_FRAMES_PER_SECOND))
-            if ticks % stride == 0:
-                self.last_frame = {"type": "frame", "t": self.stats.t, **frame.to_dict()}
-                self.publish(self.last_frame)
-            if ticks % 50 == 0:
-                self.publish({"type": "state", "state": self.stats.snapshot()})
-            if self.stats.t >= self._next_minute:
-                self._next_minute += 60_000
-                self.minutes.append(self._minute_snapshot())
-            ticks += 1
-            if self.speed > 0:
-                behind = wall0 + ticks * 0.1 / self.speed - time.perf_counter()
-                if behind > 0:
-                    await asyncio.sleep(behind)
-                elif ticks % 20 == 0:
-                    await asyncio.sleep(0)
-            elif ticks % 50 == 0:
-                await asyncio.sleep(0)
-        self.publish({"type": "state", "state": self.stats.snapshot()})
-        if self._tasks:  # let the last moments' agents finish before the scorecard is drawn up
-            await asyncio.wait(set(self._tasks), timeout=30)
-        self.full_time_card = self.scorecard()
-        self.publish({"type": "full_time", "score": self.engine.score, "scorecard": self.full_time_card,
-                      "agents": summarize(self.agent_runs)})
+    def feed(self, events: list[Event], frame: Frame, frame_dict: dict | None = None) -> None:
+        moments = self.stats.feed_frame(frame)
+        for ev in events:
+            moments += self.stats.feed_event(ev)
+            derived = self.stats.derived.get(ev.event_id)
+            body = ev.model_dump(mode="json", exclude_none=True)
+            if ev.type in KEY_EVENTS:
+                self.doc("event", f"event-{ev.event_id}", {"t": self.stats.t, "event": body, "derived": derived})
+            # the event first, so a viewer has it before any cue that cites it
+            self.publish({"type": "event", "event": body, "derived": derived})
+            for cue in self.captions.from_event(ev):
+                self.place_cue(cue)
+        for m in moments:
+            self._on_moment(m)
+        now = time.perf_counter()
+        if now - self._frame_wall >= FRAME_GAP_S:
+            self._frame_wall = now
+            self.publish({"type": "frame", "t": self.stats.t, **(frame_dict or frame.to_dict())})
+        if self._ticks % 50 == 0:
+            self.publish({"type": "state", "state": self.stats.snapshot()})
+        if self.stats.t >= self._next_minute:
+            self._next_minute += MINUTE
+            snap = self._minute_snapshot()
+            self.minutes.append(snap)
+            self.doc("snapshot", f"snap-{self.match_id}-{len(self.minutes):03d}", snap)
+        self._ticks += 1
 
     def _on_moment(self, m: Moment) -> None:
         self.publish({"type": "moment", "moment": m.model_dump(mode="json")})
         on_air = [c for c in (self.place_cue(cue) for cue in self.builder.from_moment(m)) if c is not None]
-        if self.hooks and m.kind in AGENT_KINDS:
+        if self.hooks and m.kind in AGENT_KINDS and m.moment_id not in self.done_moments:
             for hook in self.hooks:  # the agents upgrade these cards when they have something verified
                 task = asyncio.get_running_loop().create_task(hook(self, m, on_air))
                 self._tasks.add(task)
                 task.add_done_callback(self._tasks.discard)
 
-    def start(self) -> asyncio.Task:
-        self.task = asyncio.get_running_loop().create_task(self.run())
-        return self.task
+    async def finish(self, timeout: float = 30) -> None:
+        """The final whistle: let the last moments' agents finish, then publish the final state."""
+        if self._tasks:
+            await asyncio.wait(set(self._tasks), timeout=timeout)
+        self.publish({"type": "state", "state": self.stats.snapshot()})
+        self.finished = True

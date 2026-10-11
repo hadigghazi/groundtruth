@@ -103,6 +103,13 @@ class Frame:
             "players": [[pid, round(float(x), 2), round(float(y), 2)] for pid, (x, y) in zip(self.ids, self.xy)],
         }
 
+    @classmethod
+    def from_dict(cls, d: dict) -> Frame:
+        """A frame as it arrives off the bus (positions to the centimetre)."""
+        players = d["players"]
+        return cls(d["period"], d["clock_ms"], np.asarray(d["ball"], dtype=float), tuple(p[0] for p in players),
+                   np.asarray([[p[1], p[2]] for p in players], dtype=float).reshape(-1, 2))
+
 
 @dataclass
 class _Overrides:

@@ -100,10 +100,34 @@ export const api = {
   truth: (id: string) => fetch(`/api/matches/${id}/truth`).then((r) => json<{ label: string; team_id: string; period: number; clock_ms: number; source: string }[]>(r)),
 };
 
+/**
+ * The live stream for one match. On Azure the server hands out a Web PubSub URL for the
+ * match's group (with the hello snapshot); locally, this server streams it, hello first.
+ * Messages arrive in batches ({"type": "many"}) to keep the message count down.
+ */
 export function openStream(id: string, onMessage: (m: StreamMessage) => void, onClose: () => void): () => void {
-  const proto = location.protocol === "https:" ? "wss" : "ws";
-  const ws = new WebSocket(`${proto}://${location.host}/api/matches/${id}/stream`);
-  ws.onmessage = (e) => onMessage(JSON.parse(e.data) as StreamMessage);
-  ws.onclose = onClose;
-  return () => ws.close();
+  let ws: WebSocket | null = null, closed = false, timer = 0;
+  const unpack = (e: MessageEvent) => {
+    const m = JSON.parse(e.data);
+    if (m.type === "many") for (const x of m.messages) onMessage(x as StreamMessage);
+    else onMessage(m as StreamMessage);
+  };
+  const go = async () => {
+    if (closed) return;
+    let url: string | null = null;
+    try {
+      const c = await fetch(`/api/matches/${id}/connect`).then((r) => r.json());
+      if (c.url) {
+        if (!c.hello) { timer = window.setTimeout(go, 800); return; } // not kicked off yet
+        onMessage(c.hello as StreamMessage);
+        url = c.url;
+      }
+    } catch { /* fall back to this server's stream */ }
+    const proto = location.protocol === "https:" ? "wss" : "ws";
+    ws = new WebSocket(url ?? `${proto}://${location.host}/api/matches/${id}/stream`);
+    ws.onmessage = unpack;
+    ws.onclose = onClose;
+  };
+  void go();
+  return () => { closed = true; window.clearTimeout(timer); ws?.close(); };
 }

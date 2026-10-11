@@ -1,4 +1,4 @@
-"""A live session end to end with the scripted agents: template first, upgraded in place, scored at full time."""
+"""A match end to end in one process, as on Azure: simulator -> bus -> worker -> store, graded at full time."""
 
 from __future__ import annotations
 
@@ -6,17 +6,20 @@ import asyncio
 
 import pytest
 
-from groundtruth.agents.desk import brief
-from groundtruth.agents.hook import attach_agents
-from groundtruth.live.session import MatchSession
+from groundtruth.agents.desk import Desk, brief
+from groundtruth.agents.fake import ScriptedChatClient
+from groundtruth.live.runner import play
+from groundtruth.live.view import StoreView
 
 
 @pytest.fixture(scope="module")
-def session(league):
-    s = MatchSession(league["RVM"], league["HLB"], seed=11, match_id="lv01", speed=0)
-    attach_agents(s, kind="scripted")
-    asyncio.run(s.run())
-    return s
+def played():
+    return asyncio.run(play("RVM", "HLB", 11, speed=0))
+
+
+@pytest.fixture(scope="module")
+def session(played):
+    return played.session
 
 
 def test_every_flagged_shift_airs_its_template_and_then_its_verified_card(session):
@@ -43,9 +46,16 @@ def test_viewers_see_the_upgrade_instead_of_the_template(session):
             seen = session.producer.visible(profile, lang)
             ids = {c.cue_id for c in seen}
             assert not any(r in ids for c in seen for r in c.replaces)
-    upgraded = {r for feed in session.producer.schedule.values() for c in feed for r in c.replaces}
-    if upgraded:
-        assert any(c.cue_id in upgraded for c in session.producer.visible("all", "en"))  # no profile: template
+
+
+def test_everything_the_worker_produced_reached_the_store(played, session):
+    async def kinds():
+        return {k: len(await played.docs(k)) for k in ("cue", "moment", "run", "result", "snapshot", "board", "event")}
+    counts = asyncio.run(kinds())
+    assert counts["cue"] == sum(len(f) for f in session.producer.schedule.values())
+    assert counts["moment"] == len(session.stats.moments)
+    assert counts["run"] == len(session.agent_runs) and counts["result"] == len(session.agent_results)
+    assert counts["snapshot"] >= 90 and counts["event"] > 0
 
 
 def test_each_agent_run_is_recorded_with_its_timings(session):
@@ -55,10 +65,10 @@ def test_each_agent_run_is_recorded_with_its_timings(session):
     assert ok and all(r["total_ms"] >= 0 and r["tactician_ms"] is not None for r in ok)
 
 
-def test_scorecard_scores_rule_and_agents_against_the_truth_log(session):
-    card = session.full_time_card
-    assert card is not None
-    assert len(card["changes"]) == len(session.engine.truth) > 0
+def test_the_simulator_grades_the_match_at_full_time(played, session):
+    truth = asyncio.run(played.truth())
+    card = truth["scorecard"]
+    assert len(card["changes"]) == len(truth["truth"]) > 0
     for side in ("rule", "agents"):
         assert 0 <= card[side]["right_cause"] <= card[side]["caught"] <= card[side]["changes"]
     assert card["agents_verified"] == len(session.agent_results)
@@ -77,14 +87,23 @@ def test_catch_up_stops_at_the_viewers_playhead(session):
     mid = session.minutes[len(session.minutes) // 2]["t"]
     b = brief(session, mid)
     assert all(m["minute"] <= b["minute"] + 1 for m in b["moments"])
-    out = asyncio.run(session.desk.recap(mid, "en", "casual"))
+    out = asyncio.run(Desk(ScriptedChatClient()).recap(session, mid, "en", "casual"))
     assert out["verified"] and not out["fallback"], out
     h, a = _goals_before(session, mid)
     assert f"{h}-{a}" in out["headline"]
 
 
-def test_the_desk_answers_in_the_viewers_language(session):
+def test_the_store_view_answers_like_the_live_session(played, session):
+    view = asyncio.run(StoreView.load(played.platform.store, played.match_id))
     mid = session.minutes[len(session.minutes) // 3]["t"]
-    out = asyncio.run(session.desk.ask("What is the score?", mid, "ar"))
+    assert brief(view, mid) == brief(session, mid)
+    tid = session.meta.home.team_id
+    assert view.windows_at(tid, mid)["last_10_min"] == session.as_of(mid)["windows"]["recent"][tid]
+
+
+def test_the_desk_answers_in_the_viewers_language(played):
+    view = asyncio.run(StoreView.load(played.platform.store, played.match_id))
+    mid = view.minutes[len(view.minutes) // 3]["t"]
+    out = asyncio.run(Desk(ScriptedChatClient()).ask(view, "What is the score?", mid, "ar"))
     assert out["verified"] and out["answer"], out
     assert any("؀" <= ch <= "ۿ" for ch in out["answer"])

@@ -18,9 +18,8 @@ import json
 import os
 
 from ..agents.guard import UsageGuard, summarize
-from ..agents.hook import attach_agents
 from ..league import build_league
-from ..live.session import MatchSession
+from ..live.runner import play
 
 TEST_SEEDS = list(range(400, 412))  # the detector's held-out seeds: never used to choose anything
 
@@ -31,14 +30,14 @@ def _fixtures(seeds: list[int]) -> list[tuple[str, str, int]]:
 
 
 async def _play(home: str, away: str, seed: int, speed: float, kind: str | None, budget_s: float) -> dict:
-    league = build_league()
-    s = MatchSession(league[home], league[away], seed=seed, match_id=f"ae{seed}", speed=speed)
-    attach_agents(s, kind=kind, budget_s=budget_s, guard=UsageGuard(10_000, 10**9))
-    await s.run()
+    """One match end to end (simulator, bus, worker, store), graded at full time by the simulator."""
+    played = await play(home, away, seed, speed=speed, llm=kind, budget_s=budget_s, guard=UsageGuard(10_000, 10**9))
+    truth = await played.truth()
+    runs = sorted((d["run"] for d in await played.docs("run")), key=lambda r: r["t"])
     # the pack each insight was written from, kept at the time: the stats windows move on
-    insights = [{"moment_id": mid, "cause": r["cause"], "text": r["text"], "evidence": r["pack"]}
-                for mid, r in s.agent_results.items() if r.get("text") and r.get("pack")]
-    return {"seed": seed, "home": home, "away": away, "scorecard": s.scorecard(), "runs": s.agent_runs,
+    insights = [{"moment_id": r["moment_id"], "cause": r["cause"], "text": r["text"], "evidence": r["pack"]}
+                for r in await played.docs("result") if r.get("text") and r.get("pack")]
+    return {"seed": seed, "home": home, "away": away, "scorecard": truth["scorecard"], "runs": runs,
             "insights": insights}
 
 
