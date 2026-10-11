@@ -395,7 +395,7 @@ class MatchEngine:
         self.noise += -self.noise * DT / tau + sigma * math.sqrt(2 * DT / tau) * self.rng.normal(size=self.noise.shape)
         tgt += self.noise
         dist = np.linalg.norm(tgt - self.pos, axis=1)
-        cap = np.minimum(self.top_speed * 0.8 * self._fatigue(slice(None)), 1.0 + 0.2 * dist)
+        cap = np.minimum(self.top_speed * 0.8 * self._fatigue(slice(None)), 0.8 + 0.18 * dist)
         for i, (p, s) in ov.orders.items():
             tgt[i], cap[i] = p, s
         delta = tgt - self.pos
@@ -553,12 +553,12 @@ class MatchEngine:
                 self._decide(c, now, pressured)
             return
         for j, dj in zip(opp, d_opp):
-            if dj < 2.5 and j not in self.pressured_by:
+            if dj < 2.0 and j not in self.pressured_by:
                 self.pressured_by.add(int(j))
                 self._emit("pressure", team_id=self.team_ids[o], player_id=self.pid[j], **self._xy(self.pos[j]))
         for j, dj in zip(opp, d_opp):
-            if dj < 1.8 and now >= self.beaten_until[j]:
-                rate = 0.35 + 0.8 * self.tactics[o].press_intensity  # challenges per second at close range
+            if dj < 1.5 and now >= self.beaten_until[j]:
+                rate = 0.25 + 0.5 * self.tactics[o].press_intensity  # challenges per second at close range
                 if self.rng.random() < rate * DT and self._tackle(int(j), c, now):
                     return
         if now >= self.next_decision_ms:
@@ -678,7 +678,7 @@ class MatchEngine:
 
     def _decision_delay(self, c: int, pressured: bool) -> int:
         tempo = self.tactics[self.team[c]].tempo
-        s = self.rng.uniform(0.8, 2.4) * (1.25 - 0.5 * tempo) * (0.6 if pressured else 1.0)
+        s = self.rng.uniform(1.0, 3.0) * (1.25 - 0.5 * tempo) * (0.6 if pressured else 1.0)
         return int(s * 1000)
 
     def _decide(self, c: int, now: int, pressured: bool) -> None:
@@ -696,7 +696,8 @@ class MatchEngine:
                     p_shoot = 0.6
                 else:
                     blockers = len(self._defenders_in_cone(c))
-                    p_shoot = float(np.clip(0.9 * q - 0.02, 0.0, 0.45)) * (0.5 if blockers >= 2 else 1.0)
+                    base = 0.05 if dg < 25.0 else 0.02
+                    p_shoot = float(np.clip(base + 0.7 * q, 0.0, 0.45)) * (0.6 if blockers >= 2 else 1.0)
                 if self.rng.random() < p_shoot:
                     self._shoot(c, now, pressured, q=q, header=header)
                     return
@@ -752,7 +753,8 @@ class MatchEngine:
         skill = self.passing[c] - 0.5
         lg = 2.4 - 0.055 * dist + 0.18 * lane + 0.12 * recv - 0.8 * pressured + 1.2 * skill - 0.01 * np.maximum(fwd, 0)
         lh = 1.3 - 0.045 * dist + 0.20 * recv - 0.6 * pressured + 1.0 * skill
-        p = _sigmoid(np.where(high, lh, lg))
+        crowded = (uvR[:, 0] >= L - pitch.BOX_DEPTH) & (np.abs(uvR[:, 1] - W / 2) <= pitch.BOX_HALF_WIDTH)
+        p = _sigmoid(np.where(high, lh, lg) - 0.5 * crowded)  # the box is crowded
         if rk == "corner":
             p = p * 0.45
         gain = _value(uvR) - _value(np.array([u_c, v_c]))
@@ -786,7 +788,7 @@ class MatchEngine:
                 cut_gap = float(gaps[j])
         dist = float(np.linalg.norm(end - P))
         speed = min(12.0 + 0.2 * dist, 25.0) if high else min(9.0 + 0.25 * dist, 22.0)
-        steps = max(int(round(dist / speed / DT)), 2)
+        steps = max(math.ceil(dist / speed / DT), 2)
         self.flight = Flight(
             kind="pass", start=P, end=np.asarray(end, dtype=float), t0=now, t1=now + steps * TICK_MS,
             z_peak=min(2.0 + 0.12 * dist, 12.0) if high else 0.0, actor=c, team=t, outcome=outcome,
@@ -850,7 +852,7 @@ class MatchEngine:
                     end_uv = (L, pitch.POST_LOW - wide if rng.random() < 0.5 else pitch.POST_HIGH + wide)
             end = pitch.from_team(np.array(end_uv, dtype=float), d)
         dist = float(np.linalg.norm(end - P))
-        steps = max(int(round(dist / speed / DT)), 1)
+        steps = max(math.ceil(dist / speed / DT), 2)
         self.flight = Flight(
             kind="shot", start=P, end=end, t0=now, t1=now + steps * TICK_MS, z_peak=z_peak, actor=c, team=t,
             outcome=outcome, possession_id=self.possession_id, winner=winner, under_pressure=pressured,
@@ -892,7 +894,7 @@ class MatchEngine:
             elif f.outcome == "incomplete":
                 # A defender already in the lane cuts it out (interception); otherwise the
                 # ball runs loose and is picked up (recovery).
-                kind = "interception" if f.cut_gap < 1.2 else "recovery"
+                kind = "interception" if f.cut_gap < 0.7 else "recovery"
                 self._emit(kind, team_id=self.team_ids[self.team[f.winner]],
                            player_id=self.pid[f.winner], **self._xy(f.end), related=[ev.event_id])
                 self._give_ball(f.winner, now, kind)
