@@ -76,7 +76,7 @@ def main(argv: list[str] | None = None) -> None:
             engine, events, frames = simulate(league[home], league[away], seed=seed, match_id=f"c{seed}")
             r = report(engine, events, frames)
             keys = ("passes", "pass_completion", "shots", "shots_on_target", "goals", "corners", "fouls",
-                    "tackles", "interceptions", "pressures", "carries", "pass_share")
+                    "tackles", "interceptions", "recoveries", "pressures", "carries", "pass_share")
             print(f"seed {seed}: {r['score']}  {time.perf_counter() - t0:.1f}s  {len(events)} events  "
                   f"km {r['outfield_km_mean']} {r['outfield_km_range']}  top {r['top_speed_kmh_max']} km/h")
             for tid, s in r["totals"].items():

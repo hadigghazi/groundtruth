@@ -112,8 +112,8 @@ class StatsEngine:
         self._frames: dict[tuple[int, int], Frame] = {}
         self._frame_order: deque = deque()
         self._last_ids: tuple | None = None
-        self._hist: deque = deque(maxlen=11)
-        self._idx: np.ndarray | None = None
+        self._prev_xy: np.ndarray | None = None
+        self._steps: deque = deque(maxlen=10)
         self.poss_team: str | None = None
         self.poss_id: int | None = None
         self._poss_since = 0
@@ -179,18 +179,18 @@ class StatsEngine:
         self._frame_order.append(key)
         while len(self._frame_order) > 150:  # 15 s: longer than any pass or shot flight
             self._frames.pop(self._frame_order.popleft(), None)
-        if f.ids is not self._last_ids:
+        if f.ids != self._last_ids:  # line-up changed: restart the speed window
             self._last_ids = f.ids
-            self._hist.clear()
-        prev = self._hist[-1] if self._hist else None
-        self._hist.append(f.xy.astype(float))
+            self._prev_xy = None
+            self._steps.clear()
+        xy = f.xy.astype(float)
+        prev, self._prev_xy = self._prev_xy, xy
         if prev is not None:
-            step = np.linalg.norm(self._hist[-1] - prev, axis=1)
-            step = np.where(step < 1.5, step, 0.0)
-            if len(self._hist) == 11:
-                kmh = np.linalg.norm(self._hist[-1] - self._hist[0], axis=1) * 3.6
-            else:
-                kmh = step * 36.0
+            step = np.linalg.norm(xy - prev, axis=1)
+            step = np.where(step < 1.5, step, 0.0)  # a jump is a kickoff or half-time reset, not running
+            self._steps.append(step)
+            kmh = np.mean(self._steps, axis=0) * 36.0  # mean speed over the last second
+            settled = len(self._steps) == self._steps.maxlen
             for pid, s, v in zip(f.ids, step, kmh):
                 ps = self.players.get(pid)
                 if ps is None:
@@ -198,7 +198,7 @@ class StatsEngine:
                 ps.km += s / 1000.0
                 was_sprinting = ps.speed_kmh >= SPRINT_KMH
                 ps.speed_kmh = float(v)
-                if v > ps.top_kmh and len(self._hist) == 11:
+                if settled and v > ps.top_kmh:
                     ps.top_kmh = float(v)
                 if v >= HSR_KMH:
                     ps.hsr_m += s

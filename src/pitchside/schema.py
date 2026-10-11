@@ -27,6 +27,7 @@ EventType = Literal[
     "card",
     "substitution",
     "out",
+    "recovery",
 ]
 RestartType = Literal["kickoff", "throw_in", "goal_kick", "corner", "free_kick", "penalty"]
 

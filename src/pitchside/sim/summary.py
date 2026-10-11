@@ -28,7 +28,7 @@ TYPICAL = {  # per team per match, approximate
 TYPICAL_PLAYER_KM = (8.5, 13.0)  # outfield starters who play the whole match
 
 _PLURAL = {"foul": "fouls", "tackle": "tackles", "interception": "interceptions",
-           "pressure": "pressures", "carry": "carries"}
+           "pressure": "pressures", "carry": "carries", "recovery": "recoveries"}
 
 
 def team_totals(events: list[Event], team_ids: tuple[str, str]) -> dict[str, dict[str, float]]:
@@ -63,23 +63,26 @@ def player_running(frames: list[Frame]) -> dict[str, dict[str, float]]:
     """Distance (km), top speed (km/h) and minutes on the pitch per player, from the 10 Hz positions."""
     last: dict[str, tuple[int, int, np.ndarray]] = {}
     dist: dict[str, float] = defaultdict(float)
-    hist: dict[str, list[np.ndarray]] = defaultdict(list)
+    hist: dict[str, list[float]] = defaultdict(list)
     top: dict[str, float] = defaultdict(float)
     ticks: dict[str, int] = defaultdict(int)
     for f in frames:
         for pid, xy in zip(f.ids, f.xy):
             prev = last.get(pid)
+            step = 0.0
             if prev is not None and prev[0] == f.period and f.clock_ms - prev[1] == 100:
                 step = float(np.linalg.norm(xy - prev[2]))
-                if step < 1.5:  # ignore half-time and substitution jumps
-                    dist[pid] += step
+                if step >= 1.5:  # a kickoff or half-time reset, not running
+                    step = 0.0
+                dist[pid] += step
             last[pid] = (f.period, f.clock_ms, xy)
             ticks[pid] += 1
             h = hist[pid]
-            h.append(xy)
-            if len(h) > 11:
+            h.append(step)
+            if len(h) > 10:
                 h.pop(0)
-                top[pid] = max(top[pid], float(np.linalg.norm(h[-1] - h[0])) * 3.6)  # metres in 1 s -> km/h
+            if len(h) == 10:
+                top[pid] = max(top[pid], sum(h) * 3.6)  # metres covered in the last second -> km/h
     return {pid: {"km": dist[pid] / 1000.0, "top_kmh": top[pid], "minutes": ticks[pid] / 600.0} for pid in dist}
 
 

@@ -155,6 +155,7 @@ class MatchEngine:
         self.next_decision_ms = 0
         self.carry_dir = np.array([1.0, 0.0])
         self.header_ready = False
+        self._ids: tuple[str, ...] = ()
         self._teleport(self._kickoff_targets(0))
         self._emit("period_start")
         self._set_dead("kickoff", 0, (L / 2, W / 2), 0.0)
@@ -325,7 +326,9 @@ class MatchEngine:
         u = 22.0 + (u0 - 22.0) * depth + shift
         v = W / 2 + (v0 - W / 2) * width + pull * (bv - W / 2)
         gk = self.is_gk[idx]
-        u = np.where(gk, np.clip(3.0 + 0.06 * bu, 2.0, 14.0), np.clip(u, 5.0, 101.0))
+        # Out of possession the back line holds near the box edge until the ball is close.
+        floor = 5.0 if in_poss else float(np.clip(bu - 8.0, 6.0, 14.0))
+        u = np.where(gk, np.clip(3.0 + 0.06 * bu, 2.0, 14.0), np.clip(u, floor, 101.0))
         v = np.where(gk, W / 2 + 0.2 * (bv - W / 2), np.clip(v, 2.0, W - 2.0))
         if in_poss:
             u = np.where(gk, u, np.minimum(u, self._offside_line(t, bu)))
@@ -524,6 +527,7 @@ class MatchEngine:
             speed = (3.6 + 2.6 * self.dribbling[c]) * self._fatigue(c) * (0.85 if pressured else 1.0)
             ov.set(c, np.clip(P + self.carry_dir * 5.0, LO, HI), speed)
             self._press(o, c, opp, d_opp, now, ov)
+            self._mark(o, c, ov)
         self._runs(t, now, ov)
         if gk_safe or self.restart_kind is not None:
             if now >= self.next_decision_ms:
@@ -534,8 +538,8 @@ class MatchEngine:
                 self.pressured_by.add(int(j))
                 self._emit("pressure", team_id=self.team_ids[o], player_id=self.pid[j], **self._xy(self.pos[j]))
         for j, dj in zip(opp, d_opp):
-            if dj < 1.6 and now >= self.beaten_until[j]:
-                rate = 0.5 + 1.6 * self.tactics[o].press_intensity
+            if dj < 1.8 and now >= self.beaten_until[j]:
+                rate = 0.8 + 2.0 * self.tactics[o].press_intensity  # challenges per second at close range
                 if self.rng.random() < rate * DT and self._tackle(int(j), c, now):
                     return
         if now >= self.next_decision_ms:
@@ -559,6 +563,29 @@ class MatchEngine:
             n += 1
             if n >= k:
                 break
+
+    def _mark(self, o: int, c: int, ov: _Overrides) -> None:
+        """Goal-side marking of dangerous attackers once the ball is in the defenders' own 40 m."""
+        d = self.dir[o]
+        if pitch.to_team(self.pos[c], d)[0] > 40.0:
+            return
+        attackers = [int(i) for i in self._members(1 - o, outfield=True) if i != c]
+        a_uv = {i: pitch.to_team(self.pos[i], d) for i in attackers}
+        danger = sorted((i for i in attackers if a_uv[i][0] < 30.0), key=lambda i: a_uv[i][0])
+        free = [int(j) for j in self._members(o, outfield=True)
+                if j not in ov.orders and self.slot_uv[j, 0] < 45.0]
+        goal = pitch.from_team(np.array([0.0, W / 2]), d)
+        for i in danger:
+            if not free:
+                break
+            dists = [float(np.linalg.norm(self.pos[j] - self.pos[i])) for j in free]
+            k = int(np.argmin(dists))
+            if dists[k] > 18.0:
+                continue
+            j = free.pop(k)
+            to_goal = goal - self.pos[i]
+            spot = self.pos[i] + to_goal / max(float(np.linalg.norm(to_goal)), 1e-6) * 1.5
+            ov.set(j, spot, self.top_speed[j] * 0.85 * self._fatigue(j))
 
     def _runs(self, t: int, now: int, ov: _Overrides) -> None:
         tac = self.tactics[t]
@@ -587,7 +614,7 @@ class MatchEngine:
         """A tackle attempt by j on the carrier c. True when play changes hands or stops."""
         o = int(self.team[j])
         loc = self.pos[c].copy()
-        if self.rng.random() < 0.09 + 0.10 * self.tactics[o].press_intensity:
+        if self.rng.random() < 0.22 + 0.12 * self.tactics[o].press_intensity:
             self._foul(j, c, now, loc)
             return True
         p_win = float(np.clip(0.5 + 0.35 * (self.tackling[j] - self.dribbling[c]), 0.2, 0.8))
@@ -640,14 +667,17 @@ class MatchEngine:
         u, v = self._uv(c)
         if rk in (None, "free_kick") and not self.is_gk[c]:
             dg = math.hypot(L - u, W / 2 - v)
-            if dg < 32.0:
+            if dg < 30.0:
                 header = self.header_ready
                 q = true_goal_prob(u, v, pressured, self.finishing[c], header=header)
                 if rk == "free_kick":
                     p_shoot = 0.35 if dg < 28.0 and abs(v - W / 2) < 15.0 else 0.0
                     q *= 0.55
+                elif header:
+                    p_shoot = 0.6
                 else:
-                    p_shoot = float(np.clip(-0.05 + 2.6 * q + (0.35 if header else 0.0), 0.0, 0.88))
+                    blockers = len(self._defenders_in_cone(c))
+                    p_shoot = float(np.clip(1.5 * q - 0.02, 0.0, 0.55)) * (0.5 if blockers >= 2 else 1.0)
                 if self.rng.random() < p_shoot:
                     self._shoot(c, now, pressured, q=q, header=header)
                     return
@@ -701,8 +731,8 @@ class MatchEngine:
         fwd = uvR[:, 0] - u_c
         high = (dist > 32.0) | ((lane < 2.0) & (dist > 18.0)) | (rk == "corner")
         skill = self.passing[c] - 0.5
-        lg = 3.1 - 0.055 * dist + 0.18 * lane + 0.12 * recv - 0.7 * pressured + 1.2 * skill - 0.01 * np.maximum(fwd, 0)
-        lh = 2.0 - 0.045 * dist + 0.20 * recv - 0.5 * pressured + 1.0 * skill
+        lg = 2.7 - 0.055 * dist + 0.18 * lane + 0.12 * recv - 0.8 * pressured + 1.2 * skill - 0.01 * np.maximum(fwd, 0)
+        lh = 1.5 - 0.045 * dist + 0.20 * recv - 0.6 * pressured + 1.0 * skill
         p = _sigmoid(np.where(high, lh, lg))
         if rk == "corner":
             p = p * 0.45
@@ -837,9 +867,12 @@ class MatchEngine:
                 if self.header_ready:
                     self.next_decision_ms = now + 100
             elif f.outcome == "incomplete":
-                self._emit("interception", team_id=self.team_ids[self.team[f.winner]],
+                # A clean cut-out is an interception; a loose ball picked up later is a recovery.
+                gap = float(np.linalg.norm(self.pos[f.winner] - f.end))
+                kind = "interception" if gap < 2.5 else "recovery"
+                self._emit(kind, team_id=self.team_ids[self.team[f.winner]],
                            player_id=self.pid[f.winner], **self._xy(f.end), related=[ev.event_id])
-                self._give_ball(f.winner, now, "interception")
+                self._give_ball(f.winner, now, kind)
             else:
                 self._ball_out(f.end, f.team)
             return
@@ -915,5 +948,8 @@ class MatchEngine:
 
     def _frame(self) -> Frame:
         act = np.flatnonzero(self.active)
-        return Frame(self.period, self.clock_ms, self.ball.astype(np.float32),
-                     tuple(self.pid[i] for i in act), self.pos[act].astype(np.float32))
+        ids = tuple(self.pid[i] for i in act)
+        if ids != self._ids:  # one shared tuple until the line-up changes
+            self._ids = ids
+        return Frame(self.period, self.clock_ms, self.ball.astype(np.float32), self._ids,
+                     self.pos[act].astype(np.float32))
