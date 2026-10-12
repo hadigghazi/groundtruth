@@ -25,10 +25,10 @@ param location string = resourceGroup().location
 param appImage string = ''
 
 @description('Model for the Tactician (reasoning over the evidence).')
-param largeModel object = { name: 'gpt-4.1', version: '2025-04-14', capacity: 30 }
+param largeModel object = { name: 'gpt-4.1', version: '2025-04-14', capacity: 30, sku: 'GlobalStandard' }
 
 @description('Model for the judge, the Challenger, the writers and the desk (short, fast calls).')
-param smallModel object = { name: 'gpt-4.1-mini', version: '2025-04-14', capacity: 30 }
+param smallModel object = { name: 'gpt-4.1-mini', version: '2025-04-14', capacity: 30, sku: 'GlobalStandard' }
 
 @description('Role definition id of "Azure AI User", resolved by CI. Empty skips the assignment.')
 param aiUserRoleId string = ''
@@ -327,7 +327,7 @@ resource project 'Microsoft.CognitiveServices/accounts/projects@2025-06-01' = {
 resource large 'Microsoft.CognitiveServices/accounts/deployments@2025-06-01' = {
   parent: foundry
   name: 'tactician'
-  sku: { name: 'GlobalStandard', capacity: largeModel.capacity }
+  sku: { name: largeModel.?sku ?? 'GlobalStandard', capacity: largeModel.capacity } // quota is per model and deployment type
   properties: {
     model: { format: 'OpenAI', name: largeModel.name, version: largeModel.version }
     raiPolicyName: 'Microsoft.DefaultV2' // harm filters on every call, prompt shields on the Ask box
@@ -337,7 +337,7 @@ resource large 'Microsoft.CognitiveServices/accounts/deployments@2025-06-01' = {
 resource small 'Microsoft.CognitiveServices/accounts/deployments@2025-06-01' = {
   parent: foundry
   name: 'writer'
-  sku: { name: 'GlobalStandard', capacity: smallModel.capacity }
+  sku: { name: smallModel.?sku ?? 'GlobalStandard', capacity: smallModel.capacity }
   properties: {
     model: { format: 'OpenAI', name: smallModel.name, version: smallModel.version }
     raiPolicyName: 'Microsoft.DefaultV2'
