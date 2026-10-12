@@ -122,6 +122,49 @@ def _greedy(a: np.ndarray, b: np.ndarray, limit: float) -> list[tuple[int, int, 
     return pairs
 
 
+HOLD_FRAMES = 3   # a new holder must keep the ball this many frames running (0.3 s at 10 Hz)
+MIN_PASS_M = 2.0  # and the ball must have travelled this far since the previous holder had it
+REACH_M = 1.2     # the ball is "at" the nearest player within this distance
+
+
+class Possession:
+    """Who has the ball, confirmed over several frames: the same rule for detections and for the truth.
+
+    A change of possession counts as a pass only once the new holder has kept the ball for
+    HOLD_FRAMES running and the ball has travelled MIN_PASS_M since the previous holder had it.
+    Without both, a single frame where the nearest player flips (two players standing close
+    together, or a track that breaks and restarts under a new id) reads as a pass.
+    """
+
+    def __init__(self, reach_m: float = REACH_M):
+        self.reach = reach_m
+        self.holder = None
+        self.held_at = None  # where the ball was while the holder had it
+        self.cand = None
+        self.cand_n = 0
+
+    def step(self, ball_xy, players: list[tuple[tuple, np.ndarray]]) -> bool:
+        """players: (identity, position on the pitch). True on the frame that completes a pass."""
+        if ball_xy is None or not players:
+            self.cand, self.cand_n = None, 0
+            return False
+        who, pos = min(players, key=lambda p: float(np.linalg.norm(p[1] - ball_xy)))
+        if float(np.linalg.norm(pos - ball_xy)) > self.reach:
+            self.cand, self.cand_n = None, 0
+            return False
+        if who == self.holder:
+            self.held_at, self.cand, self.cand_n = np.asarray(ball_xy, float), None, 0
+            return False
+        self.cand_n = self.cand_n + 1 if who == self.cand else 1
+        self.cand = who
+        if self.cand_n < HOLD_FRAMES:
+            return False
+        was, from_xy = self.holder, self.held_at
+        self.holder, self.held_at, self.cand, self.cand_n = who, np.asarray(ball_xy, float), None, 0
+        far_enough = from_xy is None or float(np.linalg.norm(self.held_at - from_xy)) >= MIN_PASS_M
+        return was is not None and was[0] == who[0] and far_enough
+
+
 class Tracker:
     """Frame-to-frame tracks per side, from positions on the pitch; speed over the last half second."""
 
@@ -187,7 +230,7 @@ def evaluate(net, seeds: list[int], clips_per_match: int = 2, clip_minutes: floa
             meta = clip[0][0]
             kit = kits(meta)
             tracker = Tracker()
-            holder = true_holder = None
+            seen_ball, true_ball = Possession(), Possession()
             last_ball = last_true_ball = None
             last_ball_t = -10**9
             true_prev: dict[str, tuple[np.ndarray, int]] = {}
@@ -255,23 +298,13 @@ def evaluate(net, seeds: list[int], clips_per_match: int = 2, clip_minutes: floa
                     ball["fn"] += tb is not None
                     ball["fp"] += bxy is not None
                 # passes: the ball moving from one tracked player to a team-mate, seen in the picture
-                if bxy is not None and len(dp):
-                    dist = np.linalg.norm(dp - bxy, axis=1)
-                    k = int(np.argmin(dist))
-                    if dist[k] < 1.2 and k in det_track:
-                        cur = (dets[k][0], det_track[k])
-                        if holder is not None and cur[0] == holder[0] and cur[1] != holder[1]:
-                            found_passes.append((cur[0], t))
-                        holder = cur
+                if seen_ball.step(bxy, [((dets[k][0], det_track[k]), dp[k]) for k in det_track]):
+                    found_passes.append((seen_ball.holder[0], t))
                 # the same rule on the engine's own positions: the passes the picture could have shown
-                if tb is not None and truth and tb["z"] < 1.2:
-                    dmin, lab = min(((float(np.hypot(lab["x"] - tb["x"], lab["y"] - tb["y"])), lab) for lab in truth),
-                                    key=lambda d: d[0])
-                    if dmin < 1.0:
-                        cur = (lab["kind"], lab["player_id"])
-                        if true_holder is not None and cur[0] == true_holder[0] and cur[1] != true_holder[1]:
-                            true_passes.append((cur[0], t))
-                        true_holder = cur
+                ground = tb is not None and tb["z"] < 1.2
+                if true_ball.step(np.array([tb["x"], tb["y"]]) if ground else None,
+                                  [((lab["kind"], lab["player_id"]), np.array([lab["x"], lab["y"]])) for lab in truth]):
+                    true_passes.append((true_ball.holder[0], t))
                 if demo is not None and i == 0 and c == 0 and n < 600:
                     if writer is None:
                         demo.parent.mkdir(parents=True, exist_ok=True)
