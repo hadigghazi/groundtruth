@@ -7,8 +7,8 @@ on:
   workflow_dispatch:
     inputs:
       tactician:
-        description: "Deployments to try as the Tactician (space-separated): tactician = gpt-5-mini, writer = gpt-4.1-mini"
-        default: "tactician writer"
+        description: "Deployments to try as the Tactician (space-separated): tactician = gpt-5-mini, writer = gpt-4.1-mini, candidate = gpt-4o"
+        default: "writer candidate"
       effort:
         description: "Reasoning effort for a reasoning-model Tactician (minimal, low, medium)"
         default: "minimal"
@@ -47,7 +47,7 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-      - run: pip install -e ".[agents,azure]"
+      - run: pip install -e ".[agents,azure]" azure-ai-evaluation
       - uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
@@ -57,6 +57,9 @@ jobs:
         run: |
           ACCOUNT=$(az cognitiveservices account list -g "$RG" --query "[?kind=='AIServices'].name | [0]" -o tsv)
           echo "FOUNDRY_PROJECT_ENDPOINT=https://$ACCOUNT.services.ai.azure.com/api/projects/groundtruth-studio" >> "$GITHUB_ENV"
+          # groundedness, relevance and coherence of every verified card, graded by gpt-4.1-mini
+          echo "AZURE_OPENAI_ENDPOINT=https://$ACCOUNT.openai.azure.com/" >> "$GITHUB_ENV"
+          echo "GROUNDTRUTH_EVAL_DEPLOYMENT=writer" >> "$GITHUB_ENV"
           # reasoning effort applies to the reasoning model only
           if [ "${{ matrix.tactician }}" = "tactician" ]; then
             echo "GROUNDTRUTH_REASONING_EFFORT=${{ inputs.effort }}" >> "$GITHUB_ENV"

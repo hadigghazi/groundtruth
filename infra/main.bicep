@@ -30,6 +30,15 @@ param appImage string = ''
 // reasoning: the effort for a reasoning model; low keeps the Tactician inside the 20 s budget.
 param largeModel object = { name: 'gpt-5-mini', version: '2025-08-07', capacity: 100, sku: 'GlobalStandard', reasoning: 'low' }
 
+@description('A third model kept deployed so CI can measure it as the Tactician (eval workflow). Regional Standard quota.')
+param candidateModel object = { name: 'gpt-4o', version: '2024-11-20', capacity: 50, sku: 'Standard' }
+
+// Which deployment runs the Tactician live: tactician, writer or candidate. Measured on 12 held-out
+// matches (eval workflow, 2026-10-12): gpt-4.1-mini named the right cause 19/34 with 64% first-pass
+// approval and an 8.8 s median; gpt-5-mini at minimal effort 12/34, 31% and 12.2 s.
+@allowed(['tactician', 'writer', 'candidate'])
+param tacticianOn string = 'writer'
+
 @description('Model for the judge, the Challenger, the writers and the desk (short, fast calls).')
 param smallModel object = { name: 'gpt-4.1-mini', version: '2025-04-14', capacity: 100, sku: 'GlobalStandard' }
 
@@ -351,6 +360,17 @@ resource small 'Microsoft.CognitiveServices/accounts/deployments@2025-06-01' = {
   dependsOn: [large] // one deployment at a time on an account
 }
 
+resource candidate 'Microsoft.CognitiveServices/accounts/deployments@2025-06-01' = {
+  parent: foundry
+  name: 'candidate'
+  sku: { name: candidateModel.?sku ?? 'GlobalStandard', capacity: candidateModel.capacity }
+  properties: {
+    model: { format: 'OpenAI', name: candidateModel.name, version: candidateModel.version }
+    raiPolicyName: 'Microsoft.DefaultV2'
+  }
+  dependsOn: [small]
+}
+
 // the worker's agents and the API's desk call the models; only the API speaks
 var foundryGrants = concat(
   [{ who: 1, role: roles.openAiUser }, { who: 0, role: roles.openAiUser }, { who: 0, role: roles.speechUser }],
@@ -407,9 +427,9 @@ var platformEnv = [
 var modelEnv = [
   { name: 'GROUNDTRUTH_LLM', value: 'foundry' }
   { name: 'FOUNDRY_PROJECT_ENDPOINT', value: projectEndpoint }
-  { name: 'GROUNDTRUTH_MODEL_LARGE', value: large.name }
+  { name: 'GROUNDTRUTH_MODEL_LARGE', value: tacticianOn }
   { name: 'GROUNDTRUTH_MODEL_SMALL', value: small.name }
-  { name: 'GROUNDTRUTH_REASONING_EFFORT', value: largeModel.?reasoning ?? '' }
+  { name: 'GROUNDTRUTH_REASONING_EFFORT', value: tacticianOn == 'tactician' ? (largeModel.?reasoning ?? '') : '' }
 ]
 var probes = [{ type: 'Liveness', httpGet: { path: '/api/ping', port: 8000 }, periodSeconds: 30 }]
 

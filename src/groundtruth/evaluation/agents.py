@@ -37,8 +37,11 @@ async def _play(home: str, away: str, seed: int, speed: float, kind: str | None,
     # the pack each insight was written from, kept at the time: the stats windows move on
     insights = [{"moment_id": r["moment_id"], "cause": r["cause"], "text": r["text"], "evidence": r["pack"]}
                 for r in await played.docs("result") if r.get("text") and r.get("pack")]
+    board = [e for d in await played.docs("board") for e in d.get("entries", [])]
+    turned_down = [{"moment_id": e["moment_id"], "attempt": e.get("attempt"), "by": e.get("by"),
+                    "problems": e.get("problems")} for e in board if e.get("stage") == "rejected"]
     return {"seed": seed, "home": home, "away": away, "scorecard": truth["scorecard"], "runs": runs,
-            "insights": insights}
+            "insights": insights, "turned_down": turned_down}
 
 
 def _grade(insights: list[dict]) -> dict:
@@ -104,6 +107,13 @@ def evaluate(seeds: list[int] | None = None, speed: float = 8.0, kind: str | Non
         "quality": _grade(insights),
         "per_match": [{"seed": m["seed"], "fixture": f"{m['home']} v {m['away']}",
                        "rule": {k: m["scorecard"]["rule"][k] for k in ("right_cause", "changes", "false_alarms")},
-                       "agents": {k: m["scorecard"]["agents"][k] for k in ("right_cause", "changes", "false_alarms")}}
+                       "agents": {k: m["scorecard"]["agents"][k] for k in ("right_cause", "changes", "false_alarms")},
+                       # each real change: what the rule and the agents said, against the hidden label
+                       "changes": [{"team_id": c["team_id"], "label": c["label"], "rule": c["rule"].get("said"),
+                                    "agents": c["agents"].get("said")} for c in m["scorecard"].get("changes", [])],
+                       "runs": [{k: r.get(k) for k in ("minute", "outcome", "rule_cause", "cause", "team_id",
+                                                       "flagged_team", "attempts", "rejected_by", "total_ms")}
+                                for r in m["runs"]],
+                       "turned_down": m["turned_down"]}
                       for m in matches],
     }
