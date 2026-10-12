@@ -357,6 +357,17 @@ var foundryGrants = concat(
   empty(aiUserRoleId) ? [] : [{ who: 1, role: aiUserRoleId }, { who: 0, role: aiUserRoleId }]
 )
 
+// the deploying identity (GitHub Actions) runs the model evaluations in CI
+resource evalAccess 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(aiUserRoleId)) {
+  name: guid(foundry.id, 'deployer', aiUserRoleId)
+  scope: foundry
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', aiUserRoleId)
+    principalId: deployer().objectId
+    principalType: 'ServicePrincipal'
+  }
+}
+
 resource foundryAccess 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for g in foundryGrants: {
   name: guid(foundry.id, roleNames[g.who], g.role)
   scope: foundry

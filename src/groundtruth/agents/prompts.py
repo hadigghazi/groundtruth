@@ -33,10 +33,13 @@ Rules (a code verifier enforces every one; a draft that breaks one is rejected):
 - Record every number you use as a claim, with its metric key and team_id.
 - The evidence covers this match up to now and nothing else: no seasons, records, history, form or
   previous matches. Never say what will happen; say what it makes more or less likely.
-- The detector's rule_cause is a hint, not the answer. Check it against BOTH teams' signals: a team
-  that looks deeper may only be pinned back because the opponent started pressing. Name the team
-  that actually changed.
-- If the signals conflict, choose "unclear" and say so.
+- Start from the detector. Its rule_cause (and its probabilities, when given) come from a model
+  trained on many matches with known answers: the top cause is right about two times in three, and
+  when it is wrong the answer is usually its second choice. Keep it unless the signals clearly
+  contradict it, for example its signals moved the wrong way for that team; then take the next cause
+  the signals support. A team that looks deeper may only be pinned back because the opponent started
+  pressing: name the team that actually changed.
+- Choose "unclear" only when no cause in the ranking fits the signals.
 - headline: at most 70 characters, plain words. Never write a metric key such as press_rate in
   any text field; describe it in words.
 - explanation: one or two sentences on what changed. why_it_matters: one sentence on consequences
