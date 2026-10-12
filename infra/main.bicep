@@ -334,6 +334,7 @@ resource large 'Microsoft.CognitiveServices/accounts/deployments@2025-06-01' = {
     model: { format: 'OpenAI', name: largeModel.name, version: largeModel.version }
     raiPolicyName: 'Microsoft.DefaultV2' // harm filters on every call, prompt shields on the Ask box
   }
+  dependsOn: [project] // the account takes one change at a time: project, then each deployment
 }
 
 resource small 'Microsoft.CognitiveServices/accounts/deployments@2025-06-01' = {
