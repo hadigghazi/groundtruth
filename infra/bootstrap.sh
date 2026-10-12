@@ -18,7 +18,7 @@ echo "Subscription: $(az account show --query name -o tsv) ($SUB)"
 
 echo "Registering resource providers (first time takes a minute)..."
 for ns in Microsoft.App Microsoft.OperationalInsights Microsoft.Insights Microsoft.CognitiveServices \
-          Microsoft.EventHub Microsoft.ContainerRegistry Microsoft.ManagedIdentity Microsoft.Consumption; do
+          Microsoft.EventHub Microsoft.ContainerRegistry Microsoft.ManagedIdentity Microsoft.Consumption \n          Microsoft.DocumentDB Microsoft.SignalRService Microsoft.Storage Microsoft.ApiManagement; do
   az provider register --namespace "$ns" --wait >/dev/null
 done
 
