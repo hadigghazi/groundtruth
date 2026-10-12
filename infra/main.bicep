@@ -25,10 +25,12 @@ param location string = resourceGroup().location
 param appImage string = ''
 
 @description('Model for the Tactician (reasoning over the evidence).')
-param largeModel object = { name: 'gpt-4.1', version: '2025-04-14', capacity: 30, sku: 'GlobalStandard' }
+// A new pay-as-you-go subscription gets no GlobalStandard quota for gpt-4.1, but has 500K TPM of
+// gpt-5-mini and 200K of gpt-4.1-mini in every region (az cognitiveservices usage list).
+param largeModel object = { name: 'gpt-5-mini', version: '2025-08-07', capacity: 100, sku: 'GlobalStandard' }
 
 @description('Model for the judge, the Challenger, the writers and the desk (short, fast calls).')
-param smallModel object = { name: 'gpt-4.1-mini', version: '2025-04-14', capacity: 30, sku: 'GlobalStandard' }
+param smallModel object = { name: 'gpt-4.1-mini', version: '2025-04-14', capacity: 100, sku: 'GlobalStandard' }
 
 @description('Role definition id of "Azure AI User", resolved by CI. Empty skips the assignment.')
 param aiUserRoleId string = ''
