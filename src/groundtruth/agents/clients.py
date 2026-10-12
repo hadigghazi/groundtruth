@@ -5,7 +5,8 @@ GROUNDTRUTH_LLM=openai    any OpenAI-compatible endpoint (OPENAI_API_KEY, option
 GROUNDTRUTH_LLM=scripted  the deterministic scripted client (default; no network)
 
 GROUNDTRUTH_MODEL_LARGE runs the Tactician; GROUNDTRUTH_MODEL_SMALL runs the Verifier's judge and the
-Persona writers, which do simpler work and need to be fast.
+Persona writers, which do simpler work and need to be fast. GROUNDTRUTH_REASONING_EFFORT (low, medium,
+high) caps the Tactician's thinking when the large model is a reasoning model such as gpt-5-mini.
 """
 
 from __future__ import annotations

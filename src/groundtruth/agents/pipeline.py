@@ -26,6 +26,7 @@ with its latency and token use.
 
 from __future__ import annotations
 
+import os
 import time
 from collections.abc import Callable
 from contextvars import ContextVar
@@ -175,6 +176,16 @@ def make_tools(stats: StatsEngine, record: list[float]):
 
 # ---------------------------------------------------------------- executors
 
+def _reasoning() -> dict:
+    """The Tactician's reasoning effort when its model is a reasoning model (GROUNDTRUTH_REASONING_EFFORT).
+
+    At the default effort gpt-5-mini thinks for thousands of tokens and misses the 20 s budget. Sent
+    to the primary model only: the backup and the writers are not reasoning models and refuse it.
+    """
+    effort = os.environ.get("GROUNDTRUTH_REASONING_EFFORT", "").strip()
+    return {"reasoning": {"effort": effort}} if effort else {}
+
+
 class Tactician(Executor):
     """The larger model drafts; if it fails outright (outage, quota), the backup model drafts instead."""
 
@@ -194,7 +205,8 @@ class Tactician(Executor):
             if agent is None:
                 continue
             try:
-                resp = await agent.run(task(payload), options={"response_format": Insight})
+                extra = _reasoning() if model == "primary" else {}
+                resp = await agent.run(task(payload), options={"response_format": Insight, **extra})
                 insight, used = _parse(Insight, resp), usage(resp)
                 err = None if insight else "the reply was not a valid Insight"
                 break

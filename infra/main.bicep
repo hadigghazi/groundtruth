@@ -27,7 +27,8 @@ param appImage string = ''
 @description('Model for the Tactician (reasoning over the evidence).')
 // A new pay-as-you-go subscription gets no GlobalStandard quota for gpt-4.1, but has 500K TPM of
 // gpt-5-mini and 200K of gpt-4.1-mini in every region (az cognitiveservices usage list).
-param largeModel object = { name: 'gpt-5-mini', version: '2025-08-07', capacity: 100, sku: 'GlobalStandard' }
+// reasoning: the effort for a reasoning model; low keeps the Tactician inside the 20 s budget.
+param largeModel object = { name: 'gpt-5-mini', version: '2025-08-07', capacity: 100, sku: 'GlobalStandard', reasoning: 'low' }
 
 @description('Model for the judge, the Challenger, the writers and the desk (short, fast calls).')
 param smallModel object = { name: 'gpt-4.1-mini', version: '2025-04-14', capacity: 100, sku: 'GlobalStandard' }
@@ -397,6 +398,7 @@ var modelEnv = [
   { name: 'FOUNDRY_PROJECT_ENDPOINT', value: projectEndpoint }
   { name: 'GROUNDTRUTH_MODEL_LARGE', value: large.name }
   { name: 'GROUNDTRUTH_MODEL_SMALL', value: small.name }
+  { name: 'GROUNDTRUTH_REASONING_EFFORT', value: largeModel.?reasoning ?? '' }
 ]
 var probes = [{ type: 'Liveness', httpGet: { path: '/api/ping', port: 8000 }, periodSeconds: 30 }]
 
