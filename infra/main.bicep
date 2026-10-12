@@ -25,7 +25,7 @@ param location string = resourceGroup().location
 param appImage string = ''
 
 @description('Model for the Tactician (reasoning over the evidence).')
-param largeModel object = { name: 'gpt-4.1-mini', version: '2025-04-14', capacity: 30 }
+param largeModel object = { name: 'gpt-4.1', version: '2025-04-14', capacity: 30 }
 
 @description('Model for the judge, the Challenger, the writers and the desk (short, fast calls).')
 param smallModel object = { name: 'gpt-4.1-mini', version: '2025-04-14', capacity: 30 }
