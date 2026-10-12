@@ -95,13 +95,18 @@ def evaluate(seeds: list[int] | None = None, speed: float = 8.0, kind: str | Non
     for side in ("rule", "agents"):
         total[side] = {k: sum(m["scorecard"][side][k] for m in matches)
                        for k in ("changes", "alerts", "caught", "right_cause", "false_alarms")}
+    # what viewers saw: the verified card where the agents finished in time, the template card
+    # (the detector's own cause) where they did not
+    changes = [c for m in matches for c in m["scorecard"].get("changes", [])]
+    aired = sum((c["agents"].get("said") or c["rule"].get("said")) == c["label"] for c in changes)
     runs = [r for m in matches for r in m["runs"]]
     insights = [i for m in matches for i in m["insights"]]
     return {
         "matches": len(matches), "seeds": [m["seed"] for m in matches], "speed": speed,
         "model": {"kind": kind or os.environ.get("GROUNDTRUTH_LLM", "scripted"),
                   "large": os.environ.get("GROUNDTRUTH_MODEL_LARGE"), "small": os.environ.get("GROUNDTRUTH_MODEL_SMALL")},
-        "right_cause": {side: f"{t['right_cause']}/{t['changes']}" for side, t in total.items()},
+        "right_cause": {**{side: f"{t['right_cause']}/{t['changes']}" for side, t in total.items()},
+                        "on_air": f"{aired}/{len(changes)}"},
         "totals": total,
         "latency": summarize(runs),
         "quality": _grade(insights),

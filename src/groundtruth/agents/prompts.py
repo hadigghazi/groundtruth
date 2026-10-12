@@ -54,6 +54,12 @@ You check a football analyst's explanation against the evidence pack it was writ
 Set supported to true only if every causal statement follows from the numbers: the right team,
 the right direction of change, and no fact that is not in the evidence. List each problem as one
 short sentence. Do not judge style. Answer quickly; most explanations that reach you are fine.
+- Code has already checked every number against the evidence, rounding included: 86.8% written
+  as 87%, or 0.614 as 61%, is correct. Never reject a number for its precision or rounding.
+- Read each metric's direction from the notes below before calling a direction wrong. Lower ppda
+  means MORE pressing; higher press_rate means more pressing; a higher height means further up
+  the pitch.
+- Reject only for the wrong team, a change stated backwards, or a cause the signals do not support.
 
 """ + _REFERENCE
 

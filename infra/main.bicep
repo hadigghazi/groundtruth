@@ -40,7 +40,7 @@ param candidateModel object = { name: 'gpt-4o', version: '2024-11-20', capacity:
 param tacticianOn string = 'writer'
 
 @description('Model for the judge, the Challenger, the writers and the desk (short, fast calls).')
-param smallModel object = { name: 'gpt-4.1-mini', version: '2025-04-14', capacity: 100, sku: 'GlobalStandard' }
+param smallModel object = { name: 'gpt-4.1-mini', version: '2025-04-14', capacity: 200, sku: 'GlobalStandard' } // the whole quota: it runs every agent
 
 // Built-in role ids are the same in every tenant. The Foundry project endpoint the agents call
 // needs "Azure AI User"; "Cognitive Services OpenAI User" alone gets a 403 there.
