@@ -31,15 +31,35 @@ if [ -z "$APP_ID" ]; then
 fi
 az ad sp show --id "$APP_ID" >/dev/null 2>&1 || az ad sp create --id "$APP_ID" --output none
 
-# GitHub Actions may sign in only from pushes and manual runs on main.
-if ! az ad app federated-credential list --id "$APP_ID" --query "[?name=='github-main'].name" -o tsv | grep -q github-main; then
-  az ad app federated-credential create --id "$APP_ID" --parameters "{
-    \"name\": \"github-main\",
-    \"issuer\": \"https://token.actions.githubusercontent.com\",
-    \"subject\": \"repo:${REPO}:ref:refs/heads/main\",
-    \"audiences\": [\"api://AzureADTokenExchange\"]
-  }" --output none
+# GitHub Actions may sign in only from pushes and manual runs on main. GitHub presents the
+# repository either by name or in its "immutable" form, which carries the owner and repository
+# ids (repo:owner@123/name@456:...), so both subjects are registered.
+OWNER=${REPO%%/*}
+NAME=${REPO##*/}
+META=$(curl -fsSL "https://api.github.com/repos/$REPO" || true)
+OWNER_ID=$(printf '%s' "$META" | python3 -c 'import json,sys; print(json.load(sys.stdin)["owner"]["id"])' 2>/dev/null || true)
+REPO_ID=$(printf '%s' "$META" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])' 2>/dev/null || true)
+
+SUBJECTS=("repo:${REPO}:ref:refs/heads/main")
+if [ -n "$OWNER_ID" ] && [ -n "$REPO_ID" ]; then
+  SUBJECTS+=("repo:${OWNER}@${OWNER_ID}/${NAME}@${REPO_ID}:ref:refs/heads/main")
+else
+  echo "Could not read the repository ids from GitHub; registering the plain subject only." >&2
 fi
+
+n=0
+for SUBJECT in "${SUBJECTS[@]}"; do
+  n=$((n + 1))
+  if [ -z "$(az ad app federated-credential list --id "$APP_ID" --query "[?subject=='$SUBJECT'].name" -o tsv)" ]; then
+    az ad app federated-credential create --id "$APP_ID" --parameters "{
+      \"name\": \"github-main-${n}\",
+      \"issuer\": \"https://token.actions.githubusercontent.com\",
+      \"subject\": \"${SUBJECT}\",
+      \"audiences\": [\"api://AzureADTokenExchange\"]
+    }" --output none
+    echo "Registered sign-in subject: $SUBJECT"
+  fi
+done
 
 SCOPE="/subscriptions/$SUB/resourceGroups/$RG"
 # Contributor creates the resources; the RBAC role lets the template give the app's own
