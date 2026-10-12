@@ -32,8 +32,10 @@ param largeModel object = { name: 'gpt-5-mini', version: '2025-08-07', capacity:
 @description('Model for the judge, the Challenger, the writers and the desk (short, fast calls).')
 param smallModel object = { name: 'gpt-4.1-mini', version: '2025-04-14', capacity: 100, sku: 'GlobalStandard' }
 
-@description('Role definition id of "Azure AI User", resolved by CI. Empty skips the assignment.')
-param aiUserRoleId string = ''
+// Built-in role ids are the same in every tenant. The Foundry project endpoint the agents call
+// needs "Azure AI User"; "Cognitive Services OpenAI User" alone gets a 403 there.
+@description('Role definition id of "Azure AI User". Empty skips the assignment.')
+param aiUserRoleId string = '53ca6127-db72-4b80-b1b0-d745d6d5456d'
 
 @description('Web PubSub tier: Free_F1 (20 connections) for development, Standard_S1 for the judging window.')
 @allowed(['Free_F1', 'Standard_S1'])

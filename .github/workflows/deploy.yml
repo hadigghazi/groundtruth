@@ -39,10 +39,8 @@ jobs:
       - name: Provision services (everything but the app)
         if: env.HAS_AZURE == 'true'
         run: |
-          AI_USER=$(az role definition list --name "Azure AI User" --query "[0].name" -o tsv || true)
-          echo "AI_USER=$AI_USER" >> "$GITHUB_ENV"
           az deployment group create -g "$RG" -n "base-${{ github.run_number }}" -f infra/main.bicep \
-            -p aiUserRoleId="$AI_USER" ${{ vars.BICEP_PARAMS }} --query properties.outputs -o json > outputs.json
+            ${{ vars.BICEP_PARAMS }} --query properties.outputs -o json > outputs.json
           echo "REGISTRY=$(jq -r .registryName.value outputs.json)" >> "$GITHUB_ENV"
           echo "SERVER=$(jq -r .registryServer.value outputs.json)" >> "$GITHUB_ENV"
       - uses: docker/setup-buildx-action@v3
@@ -62,7 +60,7 @@ jobs:
         if: env.HAS_AZURE == 'true'
         run: |
           az deployment group create -g "$RG" -n "app-${{ github.run_number }}" -f infra/main.bicep \
-            -p aiUserRoleId="$AI_USER" appImage="$SERVER/groundtruth:${{ github.sha }}" ${{ vars.BICEP_PARAMS }} -o none
+            -p appImage="$SERVER/groundtruth:${{ github.sha }}" ${{ vars.BICEP_PARAMS }} -o none
           FQDN=$(az containerapp show -g "$RG" -n groundtruth --query properties.configuration.ingress.fqdn -o tsv)
           echo "URL=https://$FQDN" >> "$GITHUB_ENV"
           echo "### Live at https://$FQDN" >> "$GITHUB_STEP_SUMMARY"
