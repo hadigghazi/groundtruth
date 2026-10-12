@@ -1,0 +1,37 @@
+name: logs
+
+# The last lines each running app wrote, for debugging the live deployment. On demand only.
+
+on:
+  workflow_dispatch:
+    inputs:
+      lines:
+        description: "Lines per app"
+        default: "300"
+
+jobs:
+  logs:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      RG: groundtruth-rg
+    steps:
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: App logs
+        run: |
+          for app in groundtruth groundtruth-worker groundtruth-simulator; do
+            echo "::group::$app"
+            az containerapp revision list -g "$RG" -n "$app" --query "[].{name:name,active:properties.active,replicas:properties.replicas,created:properties.createdTime,health:properties.healthState}" -o table || true
+            az containerapp logs show -g "$RG" -n "$app" --tail ${{ inputs.lines }} --format text 2>&1 | tee "$app.log" || true
+            echo "::endgroup::"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: logs
+          path: "*.log"
