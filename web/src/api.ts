@@ -127,7 +127,8 @@ export const api = {
 export function openStream(id: string, onMessage: (m: StreamMessage) => void, onClose: () => void): () => void {
   let ws: WebSocket | null = null, closed = false, timer = 0;
   const unpack = (e: MessageEvent) => {
-    const m = JSON.parse(e.data);
+    let m = JSON.parse(e.data);
+    if (typeof m === "string") m = JSON.parse(m); // a message encoded twice on the way
     if (m.type === "many") for (const x of m.messages) onMessage(x as StreamMessage);
     else onMessage(m as StreamMessage);
   };

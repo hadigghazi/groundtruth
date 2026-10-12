@@ -86,7 +86,9 @@ class WebPubSubBroadcaster:
             return
         body = json.dumps({"type": "many", "messages": messages}, separators=(",", ":"))
         try:
-            await self._c().send_to_group(group(match_id), body, content_type="application/json")
+            # text/plain: the body is already JSON. With application/json the SDK encodes the string
+            # again and viewers receive a quoted string they cannot read.
+            await self._c().send_to_group(group(match_id), body, content_type="text/plain")
         except Exception as e:  # a delivery hiccup must not stop the match
             log.warning("web pubsub send failed: %s", e)
 
