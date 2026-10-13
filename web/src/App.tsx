@@ -125,7 +125,7 @@ function ViewerColumn({ buf, viewer, setViewer, view, getT, slowT, compact, spli
           </Dropdown>
         </Tooltip>
         <Tooltip content={s.view.tipCatchUp} relationship="description">
-          <Button size="small" appearance="subtle" icon={<History20Regular />} onClick={() => void catchUp()}>{compact ? "" : s.catchUp}</Button>
+          <Button size="small" appearance="subtle" icon={<History20Regular />} aria-label={s.catchUp} onClick={() => void catchUp()}>{compact ? "" : s.catchUp}</Button>
         </Tooltip>
         <Tooltip content={s.voice} relationship="label">
           <ToggleButton size="small" appearance="subtle" checked={voice} onClick={() => setVoice(!voice)}
