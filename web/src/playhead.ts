@@ -41,8 +41,10 @@ export function usePlayhead(buf: MatchBuffer): Playhead {
         const s = Math.max(buf.speed, 1);
         const cushion = 700 * s;
         const lag = target - t.current;
-        if (t.current < first || (!buf.fullTime && lag > 12_000 * s)) {
-          t.current = Math.max(first, target - cushion); // far behind (a background tab): rejoin
+        // far behind (a background tab, or opening a match that has already ended): rejoin. At full
+        // time the delay itself still plays out, so only a gap well beyond it counts.
+        if (t.current < first || lag > (buf.delayS + 8) * 1000 * s) {
+          t.current = Math.max(first, target - cushion);
         } else {
           const ease = lag > 2 * cushion ? 1.15 : lag < cushion ? Math.max(0.4, lag / cushion) : 1;
           t.current = Math.min(target, t.current + rate * ease);
