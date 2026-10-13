@@ -138,10 +138,11 @@ export class MatchBuffer {
   scoreAt(t: number): [number, number] {
     if (!this.meta) return [0, 0];
     const tAt = this.timeOfClock();
+    const all = this.fullTime && t >= this.liveT - 1; // a finished match opened later has no frames to place goals on
     let h = 0, a = 0;
     for (const e of this.events) {
       if (e.type !== "goal") continue;
-      if (tAt(e.period, e.clock_ms) > t) continue;
+      if (!all && tAt(e.period, e.clock_ms) > t) continue;
       if (e.team_id === this.meta.home.team_id) h++; else a++;
     }
     return [h, a];

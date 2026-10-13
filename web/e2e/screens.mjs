@@ -56,6 +56,8 @@ await shot("06-stats");
 
 try {  // the personal overlays: one metric to watch, a player to follow, the player cam
   await page.getByRole("combobox", { name: "Watch" }).first().click();
+  const box = await page.locator('[role="listbox"]').last().boundingBox(); // a list squashed to nothing has failed
+  if (!box || box.height < 60) errors.push(`the Watch list opened ${box ? Math.round(box.height) : 0} px tall`);
   await page.getByRole("option", { name: "Possession", exact: true }).first().click();
   await page.getByRole("combobox", { name: "Follow" }).first().click();
   await page.getByRole("option").nth(4).click();

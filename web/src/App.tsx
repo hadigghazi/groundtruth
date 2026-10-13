@@ -101,28 +101,28 @@ function ViewerColumn({ buf, viewer, setViewer, view, getT, slowT, compact, spli
     <Local lang={viewer.lang} className={`viewer ${compact ? "compact" : ""}`}>
       <div className="viewer-bar">
         {split && <span className="vb-who">{fill(s.view.viewerN, { n: index + 1 })}</span>}
-        <Tooltip content={s.view.tipMode} relationship="description" positioning="above-start">
+        <Tooltip content={s.view.tipMode} relationship="description" positioning="above-start"><span className="vb-tip">
           <Dropdown className="vb-dd" size="small" appearance="filled-darker" aria-label={s.viewer}
             value={viewer.mode === "analyst" ? s.analyst : s.casual} selectedOptions={[viewer.mode]}
             onOptionSelect={(_, d) => setViewer({ ...viewer, mode: d.optionValue as Mode })}>
             <Option value="analyst">{s.analyst}</Option><Option value="casual">{s.casual}</Option>
-          </Dropdown>
+          </Dropdown></span>
         </Tooltip>
-        <Tooltip content={s.view.tipLang} relationship="description" positioning="above-start">
+        <Tooltip content={s.view.tipLang} relationship="description" positioning="above-start"><span className="vb-tip">
           <Dropdown className="vb-dd" size="small" appearance="filled-darker" aria-label={s.language}
             value={LANG_LABEL[viewer.lang]} selectedOptions={[viewer.lang]}
             onOptionSelect={(_, d) => setViewer({ ...viewer, lang: d.optionValue as Lang })}>
             {LANGS.map((l) => <Option key={l} value={l}>{LANG_LABEL[l]}</Option>)}
-          </Dropdown>
+          </Dropdown></span>
         </Tooltip>
-        <Tooltip content={s.view.tipClub} relationship="description" positioning="above-start">
+        <Tooltip content={s.view.tipClub} relationship="description" positioning="above-start"><span className="vb-tip">
           <Dropdown className="vb-dd" size="small" appearance="filled-darker" aria-label={s.club}
             value={viewer.club ? fill(s.view.fanOf, { club: clubName(viewer.club) }) : s.anyClub} selectedOptions={[viewer.club ?? ""]}
             onOptionSelect={(_, d) => setViewer({ ...viewer, club: d.optionValue || null })}>
             <Option value="">{s.anyClub}</Option>
             <Option value={meta.home.team_id} text={fill(s.view.fanOf, { club: meta.home.short_name })}>{fill(s.view.fanOf, { club: meta.home.short_name })}</Option>
             <Option value={meta.away.team_id} text={fill(s.view.fanOf, { club: meta.away.short_name })}>{fill(s.view.fanOf, { club: meta.away.short_name })}</Option>
-          </Dropdown>
+          </Dropdown></span>
         </Tooltip>
         <Tooltip content={s.view.tipCatchUp} relationship="description">
           <Button size="small" appearance="subtle" icon={<History20Regular />} aria-label={s.catchUp} onClick={() => void catchUp()}>{compact ? "" : s.catchUp}</Button>
@@ -132,14 +132,14 @@ function ViewerColumn({ buf, viewer, setViewer, view, getT, slowT, compact, spli
             icon={voice ? <Speaker220Regular /> : <SpeakerMute20Regular />} />
         </Tooltip>
         {!compact && (
-          <Tooltip content={s.view.tipMetric} relationship="description" positioning="above-start">
+          <Tooltip content={s.view.tipMetric} relationship="description" positioning="above-start"><span className="vb-tip">
           <Dropdown className="vb-dd" size="small" appearance="filled-darker" aria-label={s.metricWord}
             positioning="below-start" listbox={{ className: "vb-list" }}
             value={`${s.metricWord}: ${viewer.metric ? METRICS[viewer.metric].label[viewer.lang] : s.noMetric}`}
             selectedOptions={[viewer.metric ?? ""]} onOptionSelect={(_, d) => setViewer({ ...viewer, metric: d.optionValue || null })}>
             <Option value="">{s.noMetric}</Option>
             {Object.entries(METRICS).map(([k, m]) => <Option key={k} value={k}>{m.label[viewer.lang]}</Option>)}
-          </Dropdown>
+          </Dropdown></span>
           </Tooltip>
         )}
         {viewer.player && view === "broadcast" && (
@@ -149,14 +149,14 @@ function ViewerColumn({ buf, viewer, setViewer, view, getT, slowT, compact, spli
           </Tooltip>
         )}
         {!compact && (
-          <Tooltip content={s.view.tipFollow} relationship="description" positioning="above-start">
+          <Tooltip content={s.view.tipFollow} relationship="description" positioning="above-start"><span className="vb-tip">
           <Dropdown className="vb-dd" size="small" appearance="filled-darker" aria-label={s.player}
             positioning="below-start" listbox={{ className: "vb-list" }}
             value={`${s.player}: ${playerName(viewer.player)}`} selectedOptions={[viewer.player ?? ""]}
             onOptionSelect={(_, d) => setViewer({ ...viewer, player: d.optionValue || null })}>
             <Option value="">{s.noPlayer}</Option>
             {players.map((p) => <Option key={p.player_id} value={p.player_id} text={`${p.number} ${p.short_name}`}>{p.number} {p.short_name}</Option>)}
-          </Dropdown>
+          </Dropdown></span>
           </Tooltip>
         )}
       </div>
