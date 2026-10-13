@@ -37,6 +37,9 @@ await shot("01-home");
 
 const { match_id: id } = await api("/api/matches", { home: "RVM", away: "HLB", seed: 7, speed, scripted: true });
 await page.goto(`${base}/#match=${id}`);
+await page.waitForSelector(".howto"); // opens by itself on a first visit
+await shot("02a-howto");
+await page.getByRole("button", { name: "Got it" }).click();
 await page.waitForSelector(".gt-bug");
 await page.waitForTimeout(20000);
 await shot("02-broadcast");
@@ -112,6 +115,7 @@ await page.waitForTimeout(4000);
 await shot("14-match-ar");
 
 const mobile = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true });
+await mobile.addInitScript(() => localStorage.setItem("gt-howto-seen", "1"));
 const phone = await mobile.newPage();
 phone.on("pageerror", (e) => { errors.push(e.message); console.log("pageerror (phone):", e.message); });
 await phone.goto(base);
