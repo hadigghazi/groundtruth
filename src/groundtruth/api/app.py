@@ -227,7 +227,8 @@ async def create_match(req: NewMatch) -> dict:
 
 @app.get("/api/matches")
 async def list_matches() -> list[dict]:
-    docs = sorted(await P().store.matches(), key=lambda m: -m.get("created", 0))
+    docs = sorted((m for m in await P().store.matches() if m.get("status") not in ("abandoned", "failed")),
+                  key=lambda m: -m.get("created", 0))
     return [{"match_id": m["match_id"], "home": m["home"], "away": m["away"], "status": m.get("status"),
              "finished": m.get("status") == "finished", "score": m.get("score", [0, 0])} for m in docs[:30]]
 

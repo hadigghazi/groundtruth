@@ -5,7 +5,12 @@ each match as a feed a real data provider could send: "meta", then a "tick" ever
 of play (positions and the events that resolved), then "end".
 
 The truth log (every hidden tactical change and when it took effect) never leaves this
-process during play. At full time, once the workers say their agents have finished, the
+process during play.
+
+A restart (a deploy, a crash) does not lose a match: the engine is deterministic, so on
+start-up every match still marked live is played again from its seed, silently and at full
+speed, with the director's changes applied where they happened, up to where the workers had
+got; from there it carries on at its own pace. A match frozen for hours is marked abandoned. At full time, once the workers say their agents have finished, the
 simulator reads what was said from the store and grades it: the scorecard and the truth
 log are written then, and only then.
 """
@@ -28,6 +33,8 @@ SEND_S = 0.1          # publish the ticks gathered over this much wall time toge
 FAST_BATCH = 25       # at full speed, ticks per publish
 AGENTS_WAIT_S = 90.0  # how long full time waits for the workers' last agent runs
 REGRADE_FOR_S = 900.0  # a worker that replays a match after a takeover reports late; grade again until then
+RESUME_WITHIN_S = 3 * 3600.0  # a match frozen for longer than this is abandoned, not resumed
+START_LOST_S = 120.0  # a match still "starting" this long after it was created lost its start command
 
 
 @dataclass
@@ -49,7 +56,32 @@ class SimulatorService:
         self.graded: dict[str, tuple[Running, dict, dict, float]] = {}  # kept for late reports
 
     async def run(self) -> None:
+        await self._resume()
         await self.p.bus.consume("control", "simulator", self._on_control)
+
+    async def _resume(self) -> None:
+        """Picks up the matches this role was playing when it last stopped."""
+        now = time.time()
+        for doc in await self.p.store.matches():
+            mid, status = doc.get("match_id", ""), doc.get("status")
+            if mid in self.running or status not in ("live", "starting"):
+                continue
+            if status == "starting" and now - doc.get("created", now) < START_LOST_S:
+                continue  # its start command is still on the way
+            if now - doc.get("started", doc.get("created", now)) > RESUME_WITHIN_S:
+                await self.p.store.upsert([{**doc, "status": "abandoned"}])
+                log.warning("%s was frozen too long ago to resume; marked abandoned", mid)
+                continue
+            if doc.get("home") not in self.league or doc.get("away") not in self.league:
+                continue
+            live = await self.p.store.get(mid, f"live-{mid}") or {}
+            at = int(live.get("t", 0)) if status == "live" else None
+            consoles = sorted(await self.p.store.query(mid, "console"), key=lambda c: c["t"])
+            engine = MatchEngine(self.league[doc["home"]], self.league[doc["away"]], seed=int(doc["seed"]),
+                                 match_id=mid, scripted=bool(doc.get("scripted", True)))
+            m = self.running[mid] = Running(mid, engine, float(doc.get("speed", 1.0)))
+            log.warning("%s: resuming after a restart, from play time %s", mid, at if at is not None else "kick-off")
+            m.task = asyncio.get_running_loop().create_task(self._play(m, doc, resume_at=at, consoles=consoles))
 
     async def _on_control(self, msg: dict, d) -> None:
         kind, mid = msg["type"], msg.get("match_id", "")
@@ -81,22 +113,38 @@ class SimulatorService:
                 await self._full_time(g, doc, meta)
         await d.checkpoint()
 
-    async def _play(self, m: Running, doc: dict) -> None:
+    async def _play(self, m: Running, doc: dict, resume_at: int | None = None, consoles: list[dict] = ()) -> None:
+        """Plays one match onto the bus. With resume_at, everything up to that play time is played
+        again without publishing (the workers have it), re-applying the director's changes."""
         bus, mid = self.p.bus, m.match_id
         meta = m.engine.meta().model_dump(mode="json")
-        await self.p.store.upsert([{**doc, "status": "live", "meta": meta, "started": time.time()}])
+        started = doc.get("started") if resume_at is not None and doc.get("started") else time.time()
+        await self.p.store.upsert([{**doc, "status": "live", "meta": meta, "started": started}])
         await bus.publish("events", mid, [{"type": "meta", "match_id": mid, "meta": meta}])
         log.info("%s kicked off at speed %g", mid, m.speed)
         wall0, last_send, ticks, pending = time.perf_counter(), time.perf_counter(), 0, []
         pace_from, pace_ticks, pace_speed = wall0, 0, m.speed
+        replay, ci = resume_at is not None, 0
         try:
             for events, frame in m.engine.run():
                 while len(m.truth_t) < len(m.engine.truth):  # when each hidden change took effect, in play time
                     m.truth_t.append(m.t)
-                pending.append({"type": "tick", "match_id": mid, "t": m.t, "frame": frame.to_dict(),
-                                "events": [e.model_dump(mode="json", exclude_none=True) for e in events]})
+                if replay and m.t > resume_at:  # caught up with the workers: back to live pace from here
+                    replay = False
+                    pace_from, pace_ticks, last_send = time.perf_counter(), ticks, time.perf_counter()
+                    log.info("%s caught up at play time %d", mid, m.t)
+                if not replay:
+                    pending.append({"type": "tick", "match_id": mid, "t": m.t, "frame": frame.to_dict(),
+                                    "events": [e.model_dump(mode="json", exclude_none=True) for e in events]})
                 ticks += 1
                 m.t += 100
+                while ci < len(consoles) and consoles[ci]["t"] <= m.t:  # the director's changes, where they were made
+                    m.engine.intervene(consoles[ci]["team_id"], consoles[ci]["label"])
+                    ci += 1
+                if replay:
+                    if ticks % 500 == 0:
+                        await asyncio.sleep(0)  # stay responsive to the control topic while catching up
+                    continue
                 if ticks % 6000 == 0:
                     log.info("%s minute %d", mid, m.t // 60_000)
                 if m.speed != pace_speed:  # re-anchor the pacing when the director changes speed

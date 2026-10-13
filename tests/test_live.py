@@ -8,7 +8,10 @@ import pytest
 
 from groundtruth.agents.desk import Desk, brief
 from groundtruth.agents.fake import ScriptedChatClient
+from groundtruth import cloud
 from groundtruth.live.runner import play
+from groundtruth.live.simulator import SimulatorService
+from groundtruth.live.worker import WorkerService
 from groundtruth.live.view import StoreView
 
 
@@ -153,3 +156,45 @@ def test_the_final_flush_waits_for_a_write_in_flight(played):
         return stored
 
     assert asyncio.run(go()) is not None
+
+
+def test_a_restarted_simulator_finishes_the_match_it_was_playing():
+    """A deploy restarts the simulator mid-match. The new one replays the match from its seed up to
+    where the worker had got and plays on: same score, same hidden changes as an uninterrupted match."""
+    import time
+
+    async def go():
+        ref = await play("RVM", "HLB", 5, speed=0, agents=False)
+        p, mid = cloud.local(), "mrestart"
+        sim, worker = SimulatorService(p), WorkerService(p, agents=False)
+        tasks = [asyncio.create_task(sim.run()), asyncio.create_task(worker.run())]
+        start = {"home": "RVM", "away": "HLB", "seed": 5, "speed": 600, "scripted": True}
+        await p.store.upsert([{"id": f"match-{mid}", "match_id": mid, "kind": "match", "status": "starting",
+                               "outage": False, "created": time.time(), **start}])
+        await p.bus.publish("control", mid, [{"type": "start", "match_id": mid, **start}])
+        while ((await p.store.get(mid, f"live-{mid}")) or {}).get("t", 0) < 20 * 60_000:
+            await asyncio.sleep(0.05)
+        sim.running[mid].task.cancel()  # the simulator goes away mid-match
+        tasks[0].cancel()
+        await asyncio.sleep(0.2)
+        assert (await p.store.get(mid, f"match-{mid}"))["status"] == "live"
+        tasks.append(asyncio.create_task(SimulatorService(p).run()))
+        deadline = time.monotonic() + 300
+        try:
+            while await p.store.get(mid, f"truth-{mid}") is None:
+                assert time.monotonic() < deadline, "the resumed match never reached full time"
+                await asyncio.sleep(0.2)
+        finally:
+            for x in tasks:
+                x.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+        doc, ref_doc = await p.store.get(mid, f"match-{mid}"), await ref.platform.store.get(ref.match_id, f"match-{ref.match_id}")
+        truth, ref_truth = await p.store.get(mid, f"truth-{mid}"), await ref.truth()
+        return doc, ref_doc, truth, ref_truth
+
+    doc, ref_doc, truth, ref_truth = asyncio.run(go())
+    assert doc["status"] == "finished"
+    assert doc["score"] == ref_doc["score"]
+    key = lambda tr: [(c["team_id"], c["label"], c["t"]) for c in tr["truth"]]
+    assert key(truth) == key(ref_truth)
+

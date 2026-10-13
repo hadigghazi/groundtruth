@@ -39,6 +39,7 @@ class WorkerService:
         self._active: dict[str, set[str]] = defaultdict(set)  # partition -> matches in play
         self._ending: set[asyncio.Task] = set()
         self._writing: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+        self._last_t: dict[str, int] = {}  # the last tick fed, per match
 
     async def run(self) -> None:
         await asyncio.gather(self.p.bus.consume("events", "workers", self._on_event),
@@ -60,6 +61,7 @@ class WorkerService:
             if doc and doc.get("status") == "finished":  # an old match still in the hub's retention
                 self._skip.add(mid)
                 return
+            self._last_t[mid] = -1
             s = MatchSession(MatchMeta.model_validate(msg["meta"]))
             s.outage = bool(doc and doc.get("outage"))
             s.done_moments = {r["moment_id"] for r in await self.p.store.query(mid, "run")}
@@ -72,6 +74,9 @@ class WorkerService:
             log.info("%s on partition %s", mid, d.partition)
         elif kind == "tick":
             s = self.sessions.get(mid)
+            if msg["t"] <= self._last_t.get(mid, -1):  # a resumed simulator repeats a few ticks we have
+                return
+            self._last_t[mid] = msg["t"]
             if s is not None and not s.finished:
                 s.feed([Event.model_validate(e) for e in msg["events"]], Frame.from_dict(msg["frame"]), msg["frame"])
                 if s.t % 600_000 == 0:
