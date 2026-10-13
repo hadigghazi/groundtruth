@@ -119,6 +119,7 @@ export class MatchBuffer {
     const a = f[lo], b = f[hi];
     if (a.period !== b.period || b.t - a.t > 3000) return a;
     const w = (t - a.t) / (b.t - a.t);
+    const reach = 2 + (12 * (b.t - a.t)) / 1000;
     const pos = new Map(b.players.map((p) => [p[0], p]));
     return {
       ...a,
@@ -126,7 +127,8 @@ export class MatchBuffer {
       ball: [a.ball[0] + w * (b.ball[0] - a.ball[0]), a.ball[1] + w * (b.ball[1] - a.ball[1]), a.ball[2] + w * (b.ball[2] - a.ball[2])],
       players: a.players.map((p) => {
         const q = pos.get(p[0]);
-        if (!q || Math.hypot(q[1] - p[1], q[2] - p[2]) > 4) return p; // a teleport (kick-off reset): no smear
+        // further than a sprinter covers between these frames is a teleport (kick-off reset): no smear
+        if (!q || Math.hypot(q[1] - p[1], q[2] - p[2]) > reach) return p;
         return [p[0], p[1] + w * (q[1] - p[1]), p[2] + w * (q[2] - p[2])] as [string, number, number];
       }),
     };

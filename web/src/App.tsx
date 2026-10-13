@@ -1,5 +1,5 @@
 import {
-  Badge, Button, Dropdown, Field, FluentProvider, Option, SpinButton, Switch, Tab, TabList, ToggleButton, Tooltip,
+  Badge, Button, CounterBadge, Dropdown, Field, FluentProvider, Option, SpinButton, Switch, Tab, TabList, ToggleButton, Tooltip,
 } from "@fluentui/react-components";
 import {
   Bot20Regular, Chat20Regular, Cube20Regular, DataBarVertical20Regular, Gauge20Regular, Grid20Regular, History20Regular, Map20Regular,
@@ -10,6 +10,7 @@ import { api, openStream } from "./api";
 import type { Club, Cue, Frame, Lang, Mode } from "./api";
 import { Crest } from "./Crest";
 import { METRICS, MetricFocus, PlayerHud } from "./Focus";
+import { Guide, HowTo, shiftsSeen } from "./Guide";
 import { LANG_LABEL, dir, fill, strings } from "./i18n";
 import { MatchBuffer, type Viewer } from "./match";
 import { usePlayhead } from "./playhead";
@@ -183,6 +184,7 @@ function MatchScreen({ matchId }: { matchId: string }) {
   const s = strings(lead);
   const setViewer = (i: number) => (v: Viewer) => setViewers((vs) => vs.map((x, j) => (j === i ? v : x)));
   const shown = viewers.slice(0, layout);
+  const flagged = shiftsSeen(buf, slow).length;
   const langs = [...new Set(buf.cues.map((c) => c.lang))];
   return (
     <Local lang={lead} className="match">
@@ -197,7 +199,9 @@ function MatchScreen({ matchId }: { matchId: string }) {
         {buf.fullTime
           ? <Badge appearance="filled" color="informative">{s.fullTime}</Badge>
           : <Badge appearance="filled" color="danger" className="live-badge">{s.live}</Badge>}
-        <span className="muted delay">{fill(s.delay, { s: buf.delayS })}</span>
+        <Tooltip content={fill(s.guide.delayWhy, { s: buf.delayS })} relationship="description">
+          <span className="muted delay" tabIndex={0}>{fill(s.delay, { s: buf.delayS })}</span>
+        </Tooltip>
         <span className="spacer" />
         <TabList size="small" selectedValue={view} onTabSelect={(_, d) => setView(d.value as typeof view)}>
           <Tab value="broadcast" icon={<Cube20Regular />}>{s.broadcast}</Tab>
@@ -216,8 +220,10 @@ function MatchScreen({ matchId }: { matchId: string }) {
               onClick={() => { void api.speed(matchId, v); }}>{v}×</ToggleButton>
           ))}
         </div>
+        <HowTo lang={lead} />
       </header>
       <Transport buf={buf} ph={ph} lang={lead} />
+      <Guide buf={buf} meta={meta} t={slow} lang={lead} onTab={setTab} />
       <main className="match-body">
         <div className={`viewers n${layout}`}>
           {shown.map((v, i) => (
@@ -226,12 +232,16 @@ function MatchScreen({ matchId }: { matchId: string }) {
         </div>
         <aside className="side">
           <TabList size="small" selectedValue={tab} onTabSelect={(_, d) => setTab(d.value as SideTab)} className="side-tabs">
-            <Tab value="agents" icon={<Bot20Regular />}>{s.agents}</Tab>
+            <Tab value="agents" icon={<Bot20Regular />}>
+              {s.agents}{flagged > 0 && <CounterBadge className="tab-count" size="small" appearance="filled" color="brand" count={flagged} />}
+            </Tab>
             <Tab value="perf" icon={<Gauge20Regular />}>{s.performance}</Tab>
             <Tab value="director" icon={<Settings20Regular />}>{s.director}</Tab>
             <Tab value="stats" icon={<DataBarVertical20Regular />}>{s.stats}</Tab>
             <Tab value="ask" icon={<Chat20Regular />}>{s.ask}</Tab>
-            <Tab value="score" icon={<Trophy20Regular />}>{s.scorecard}</Tab>
+            <Tab value="score" icon={<Trophy20Regular />}>
+              {s.scorecard}{buf.scorecard && <CounterBadge className="tab-count" size="small" dot color="brand" />}
+            </Tab>
           </TabList>
           <div className="side-body">
             {tab === "agents" && <AgentTrace board={buf.board} meta={meta} moments={buf.moments} langs={langs} lang={lead} />}

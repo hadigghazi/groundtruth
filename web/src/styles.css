@@ -428,3 +428,21 @@ button { font: inherit; }
   .gt-wipe, .gt-stamp, .gt-stamp path, .evidence, .gt-caption, .working, .gt-bug-live::before, .live-badge::before, .loading-mark { animation: none !important; }
   .gt-stamp path { stroke-dashoffset: 0; }
 }
+
+/* the one-line guide under the timeline: what is happening now */
+.guide { display: flex; align-items: center; gap: 10px; padding: 6px 16px; border-bottom: 1px solid var(--gt-line);
+  background: linear-gradient(90deg, var(--gt-lime-dim), transparent 60%); font-size: 13px; color: var(--gt-soft); min-height: 36px; }
+.guide-text { flex: 1; line-height: 1.4; }
+.guide-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--gt-lime); }
+.guide-dot.busy { background: var(--gt-amber); animation: gt-pulse 1.1s var(--gt-ease) infinite; }
+@keyframes gt-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.35; transform: scale(0.7); } }
+@media (prefers-reduced-motion: reduce) { .guide-dot.busy { animation: none; } }
+.tab-count { margin-inline-start: 6px; }
+.delay { cursor: help; text-decoration: underline dotted var(--gt-line-2); text-underline-offset: 3px; }
+.howto { max-width: 560px; }
+.howto-steps { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 14px; }
+.howto-steps li { display: flex; gap: 12px; align-items: flex-start; }
+.howto-steps strong { font: 700 15px var(--gt-display); text-transform: uppercase; letter-spacing: 0.04em; }
+.howto-steps p { margin: 3px 0 0; line-height: 1.5; color: var(--gt-soft); }
+.howto-tip { margin: 16px 0 0; font-size: 12.5px; line-height: 1.5; }
+@media (max-width: 720px) { .guide { font-size: 12px; padding: 6px 12px; } }

@@ -36,8 +36,17 @@ export function usePlayhead(buf: MatchBuffer): Playhead {
       const rate = dt * Math.max(buf.speed, 1);
       const first = buf.frames.length ? buf.frames[0].t : 0;
       if (mode.current === "live") {
-        const snap = t.current < first || (!buf.fullTime && Math.abs(target - t.current) > 4000);
-        t.current = snap ? target : Math.min(target, t.current + rate);
+        // Frames arrive in batches a few times a second. Holding a small cushion behind the newest
+        // one, and easing the pace instead of snapping, keeps the picture moving between batches.
+        const s = Math.max(buf.speed, 1);
+        const cushion = 700 * s;
+        const lag = target - t.current;
+        if (t.current < first || (!buf.fullTime && lag > 12_000 * s)) {
+          t.current = Math.max(first, target - cushion); // far behind (a background tab): rejoin
+        } else {
+          const ease = lag > 2 * cushion ? 1.15 : lag < cushion ? Math.max(0.4, lag / cushion) : 1;
+          t.current = Math.min(target, t.current + rate * ease);
+        }
       } else if (mode.current === "replay") {
         t.current = Math.min(target, t.current + rate);
         if (t.current >= target) setMode("live");
