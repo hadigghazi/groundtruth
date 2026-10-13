@@ -56,7 +56,7 @@ await shot("06-stats");
 
 try {  // the personal overlays: one metric to watch, a player to follow, the player cam
   await page.getByRole("combobox", { name: "Watch" }).first().click();
-  await page.getByRole("option", { name: "Possession" }).click();
+  await page.getByRole("option", { name: "Possession", exact: true }).first().click();
   await page.getByRole("combobox", { name: "Follow" }).first().click();
   await page.getByRole("option").nth(4).click();
   await page.getByRole("button", { name: "Camera follows the player" }).first().click();
@@ -83,14 +83,14 @@ await page.waitForTimeout(3000);
 await shot("08c-ask");
 await page.getByRole("tab", { name: /Stats/ }).click();
 
-await page.getByRole("button", { name: "4 viewers" }).click();
+await page.getByRole("button", { name: /^Compare 4 viewers/ }).click();
 await page.mouse.move(10, 890); // move off the tooltip
 await page.waitForTimeout(3000);
 await shot("09-four-up");
 await page.getByRole("tab", { name: /Tactical/ }).click();
 await page.waitForTimeout(2000);
 await shot("10-tactical-four-up");
-await page.getByRole("button", { name: "1 viewers" }).click();
+await page.getByRole("button", { name: "One viewer" }).click();
 await page.getByRole("tab", { name: /Broadcast/ }).click();
 
 await until("full time", async () => (await api(`/api/matches/${id}`)).finished, 420);
