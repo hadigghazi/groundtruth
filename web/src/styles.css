@@ -446,3 +446,11 @@ button { font: inherit; }
 .howto-steps p { margin: 3px 0 0; line-height: 1.5; color: var(--gt-soft); }
 .howto-tip { margin: 16px 0 0; font-size: 12.5px; line-height: 1.5; }
 @media (max-width: 720px) { .guide { font-size: 12px; padding: 6px 12px; } }
+
+/* Fluent mounts tooltips and dialogs in a layer that copies the class of the provider that opened
+   them (.match, .viewer...). Without this, that layer takes the screen's full-height grid and
+   background and covers the whole page. */
+[data-portal-node="true"] {
+  display: block !important; height: auto !important; min-height: 0 !important; background: transparent !important;
+  padding: 0 !important; border: 0 !important; box-shadow: none !important;
+}
