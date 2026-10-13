@@ -453,6 +453,8 @@ button { font: inherit; }
 [data-portal-node="true"] {
   display: block !important; height: auto !important; min-height: 0 !important; background: transparent !important;
   padding: 0 !important; border: 0 !important; box-shadow: none !important;
+  /* .viewer clips its content; copied onto the layer it clipped every dropdown list to nothing */
+  overflow: visible !important; border-radius: 0 !important; transform: none !important; contain: none !important;
 }
 
 /* a viewer answers every control: a short note in the frame */
