@@ -90,7 +90,7 @@ button { font: inherit; }
 .live-score { font: 700 19px var(--gt-display); flex: 1; }
 
 /* --------------------------------------------------------------- match screen */
-.match.match { height: 100vh; height: 100dvh; display: grid; grid-template-rows: auto auto 1fr; background: var(--gt-bg); }
+.match.match { height: 100vh; height: 100dvh; display: grid; grid-template-rows: auto auto auto 1fr; /* topbar, transport, guide, body */ background: var(--gt-bg); }
 .topbar { display: flex; align-items: center; gap: 12px; padding: 8px 14px; border-bottom: 1px solid var(--gt-line); flex-wrap: wrap;
   background: linear-gradient(180deg, #0d1412, #0a100e); }
 .fixture { display: flex; align-items: center; gap: 8px; min-width: 0; font: 700 17px var(--gt-display); text-transform: uppercase; letter-spacing: 0.02em; }
