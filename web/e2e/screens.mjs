@@ -62,7 +62,7 @@ try {  // the personal overlays: one metric to watch, a player to follow, the pl
   await page.getByRole("button", { name: "Camera follows the player" }).first().click();
   await page.waitForTimeout(4000);
   await shot("06b-focus");
-} catch (e) { console.log("focus step skipped:", e.message); }
+} catch (e) { console.log("focus step skipped:", e.message); await shot("06b-focus-failed"); }
 
 await until("a stat panel on screen", async () => (await page.locator(".gt-panel").count()) > 0, 200);
 await shot("07-stat-panel");

@@ -134,6 +134,7 @@ function ViewerColumn({ buf, viewer, setViewer, view, getT, slowT, compact, spli
         {!compact && (
           <Tooltip content={s.view.tipMetric} relationship="description" positioning="above-start">
           <Dropdown className="vb-dd" size="small" appearance="filled-darker" aria-label={s.metricWord}
+            positioning="below-start" listbox={{ className: "vb-list" }}
             value={`${s.metricWord}: ${viewer.metric ? METRICS[viewer.metric].label[viewer.lang] : s.noMetric}`}
             selectedOptions={[viewer.metric ?? ""]} onOptionSelect={(_, d) => setViewer({ ...viewer, metric: d.optionValue || null })}>
             <Option value="">{s.noMetric}</Option>
@@ -150,6 +151,7 @@ function ViewerColumn({ buf, viewer, setViewer, view, getT, slowT, compact, spli
         {!compact && (
           <Tooltip content={s.view.tipFollow} relationship="description" positioning="above-start">
           <Dropdown className="vb-dd" size="small" appearance="filled-darker" aria-label={s.player}
+            positioning="below-start" listbox={{ className: "vb-list" }}
             value={`${s.player}: ${playerName(viewer.player)}`} selectedOptions={[viewer.player ?? ""]}
             onOptionSelect={(_, d) => setViewer({ ...viewer, player: d.optionValue || null })}>
             <Option value="">{s.noPlayer}</Option>
