@@ -1,6 +1,7 @@
 // "Catch me up": a recap card for one viewer, as of where their playhead is.
 
 import { Button, Spinner } from "@fluentui/react-components";
+import { useEffect } from "react";
 import { Dismiss20Regular } from "@fluentui/react-icons";
 import type { Lang, Mode } from "./api";
 import { dir, fill, strings } from "./i18n";
@@ -18,18 +19,23 @@ export async function fetchRecap(matchId: string, lang: Lang, mode: Mode, asOf: 
 
 export function Recap({ card, lang, onClose }: { card: RecapCard; lang: Lang; onClose: () => void }) {
   const s = strings(lang);
+  useEffect(() => {
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", esc);
+    return () => window.removeEventListener("keydown", esc);
+  }, [onClose]);
   return (
     <div className="gt-recap gt-wipe" dir={dir(lang)} role="dialog" aria-label={s.catchUp}>
       <div className="gt-recap-top">
         <span className="gt-panel-kicker">{s.catchUp}{card.minute != null ? ` · ${fill(s.asOf, { m: card.minute + 1 })}` : ""}</span>
-        <Button size="small" appearance="subtle" icon={<Dismiss20Regular />} aria-label={s.close} onClick={onClose} />
+        <Button size="small" appearance="secondary" icon={<Dismiss20Regular />} onClick={onClose}>{s.close}</Button>
       </div>
       {card.loading ? <Spinner size="small" label={s.thinking} /> : (
         <>
           <span className="gt-recap-head">{card.headline}</span>
           <span className="gt-recap-body">{card.body}</span>
           <span className={`gt-chip ${card.fallback ? "gt-chip-template" : "gt-chip-verified"}`}>
-            {card.fallback ? s.template : s.verified}{card.ms ? ` · ${(card.ms / 1000).toFixed(1)} s` : ""}
+            {card.fallback ? s.template : s.verified}{card.ms && card.ms >= 100 ? ` · ${(card.ms / 1000).toFixed(1)} s` : ""}
           </span>
         </>
       )}

@@ -182,6 +182,20 @@ export class MatchBuffer {
     });
   }
 
+  /** The latest analysis card before play time t, as this viewer gets it: shown again for a moment
+   *  when the viewer changes style, language or club, so the change is visible at once. */
+  latestCard(t: number, v: Viewer): Cue | undefined {
+    let best: Cue | undefined;
+    for (const c of this.cues) {
+      if (c.lang !== v.lang || c.t_in > t || (c.layer !== "lower_third" && c.layer !== "stat_panel")) continue;
+      if (c.profile !== "all" && c.profile !== v.mode) continue;
+      if (this.upgraded(c, v)) continue;
+      if (v.club && c.team_id && c.team_id !== v.club && c.priority >= 3) continue;
+      if (!best || c.t_in > best.t_in) best = c;
+    }
+    return best;
+  }
+
   /** The latest state at or before play time t (the live state when nothing older is held). */
   stateAt(t: number) {
     let best: (typeof this.states)[number] | undefined;

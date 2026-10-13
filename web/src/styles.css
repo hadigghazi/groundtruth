@@ -454,3 +454,14 @@ button { font: inherit; }
   display: block !important; height: auto !important; min-height: 0 !important; background: transparent !important;
   padding: 0 !important; border: 0 !important; box-shadow: none !important;
 }
+
+/* a viewer answers every control: a short note in the frame */
+.viewer-note { position: absolute; top: 64px; inset-inline-end: 16px; z-index: 5; max-width: min(380px, 70%);
+  background: var(--gt-panel); border: 1px solid var(--gt-line-2); border-inline-start: 3px solid var(--gt-lime);
+  padding: 10px 12px; font-size: 13px; line-height: 1.45; color: var(--gt-text); border-radius: 4px;
+  animation: gt-note 5s var(--gt-ease) forwards; pointer-events: none; }
+@keyframes gt-note { 0% { opacity: 0; transform: translateY(-6px); } 8%, 85% { opacity: 1; transform: none; } 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .viewer-note { animation: none; } }
+.viewer.compact .viewer-note { top: 44px; font-size: 12px; }
+.vb-who { font: 700 12px var(--gt-display); text-transform: uppercase; letter-spacing: 0.1em; color: var(--gt-lime);
+  padding: 0 6px; align-self: center; white-space: nowrap; }

@@ -42,9 +42,9 @@ function savedLang(): Lang {
 }
 function saveLang(l: Lang) { try { localStorage.setItem("gt-lang", l); } catch { /* private mode */ } }
 
-function ViewerColumn({ buf, viewer, setViewer, view, getT, slowT, compact, seek }: {
+function ViewerColumn({ buf, viewer, setViewer, view, getT, slowT, compact, split, index, seek }: {
   buf: MatchBuffer; viewer: Viewer; setViewer: (v: Viewer) => void; view: "broadcast" | "tactical";
-  getT: () => number; slowT: number; compact: boolean; seek: (t: number) => void;
+  getT: () => number; slowT: number; compact: boolean; split: boolean; index: number; seek: (t: number) => void;
 }) {
   const meta = buf.meta!;
   const s = strings(viewer.lang);
@@ -57,7 +57,32 @@ function ViewerColumn({ buf, viewer, setViewer, view, getT, slowT, compact, seek
   };
   const tags = useRef<Tag[]>([]);
   const getFrame = useCallback((): Frame | null => buf.frameAt(getT()), [buf, getT]);
-  const cues = buf.activeCues(slowT, viewer);
+  // every control answers at once: a note saying what changed, and the last card re-shown in the new style
+  const [note, setNote] = useState<{ text: string; until: number } | null>(null);
+  const [previewUntil, setPreviewUntil] = useState(0);
+  const first = useRef(true);
+  const prev = useRef(viewer);
+  useEffect(() => {
+    const was = prev.current;
+    prev.current = viewer;
+    if (first.current) { // a viewer opened by splitting the screen introduces itself
+      first.current = false;
+      if (!compact && !split) return;
+    }
+    const now = performance.now();
+    const v = strings(viewer.lang).view;
+    const who = `${viewer.mode === "analyst" ? s.analyst : s.casual} · ${LANG_LABEL[viewer.lang]} · ${viewer.club ? fill(v.fanOf, { club: clubName(viewer.club) }) : s.anyClub}`;
+    let text = fill(v.styled, { who });
+    if (was.metric !== viewer.metric) text = viewer.metric ? fill(buf.fullTime ? v.metricEnded : v.metric, { metric: METRICS[viewer.metric].label[viewer.lang] }) : v.metricOff;
+    else if (was.player !== viewer.player) text = viewer.player ? fill(v.follow, { player: playerName(viewer.player) }) : v.followOff;
+    else if (was.cam !== viewer.cam) text = viewer.cam ? v.camOn : v.camOff;
+    else setPreviewUntil(now + 8000);
+    setNote({ text, until: now + 5000 });
+  }, [viewer.mode, viewer.lang, viewer.club, viewer.metric, viewer.player, viewer.cam]); // eslint-disable-line react-hooks/exhaustive-deps
+  const live = buf.activeCues(slowT, viewer);
+  const again = performance.now() < previewUntil && !live.some((c) => c.layer === "lower_third" || c.layer === "stat_panel")
+    ? buf.latestCard(slowT, viewer) : undefined;
+  const cues = again ? [...live, again] : live;
   useVoice(cues, viewer.lang, viewer.mode, voice);
   tags.current = cues.filter((c) => c.layer === "player_tag" && c.anchor_player_id)
     .map((c) => ({ player_id: c.anchor_player_id!, headline: c.headline, body: c.body }));
@@ -75,24 +100,31 @@ function ViewerColumn({ buf, viewer, setViewer, view, getT, slowT, compact, seek
   return (
     <Local lang={viewer.lang} className={`viewer ${compact ? "compact" : ""}`}>
       <div className="viewer-bar">
-        <Dropdown className="vb-dd" size="small" appearance="filled-darker" aria-label={s.viewer}
-          value={viewer.mode === "analyst" ? s.analyst : s.casual} selectedOptions={[viewer.mode]}
-          onOptionSelect={(_, d) => setViewer({ ...viewer, mode: d.optionValue as Mode })}>
-          <Option value="analyst">{s.analyst}</Option><Option value="casual">{s.casual}</Option>
-        </Dropdown>
-        <Dropdown className="vb-dd" size="small" appearance="filled-darker" aria-label={s.language}
-          value={LANG_LABEL[viewer.lang]} selectedOptions={[viewer.lang]}
-          onOptionSelect={(_, d) => setViewer({ ...viewer, lang: d.optionValue as Lang })}>
-          {LANGS.map((l) => <Option key={l} value={l}>{LANG_LABEL[l]}</Option>)}
-        </Dropdown>
-        <Dropdown className="vb-dd" size="small" appearance="filled-darker" aria-label={s.club}
-          value={clubName(viewer.club)} selectedOptions={[viewer.club ?? ""]}
-          onOptionSelect={(_, d) => setViewer({ ...viewer, club: d.optionValue || null })}>
-          <Option value="">{s.anyClub}</Option>
-          <Option value={meta.home.team_id}>{meta.home.short_name}</Option>
-          <Option value={meta.away.team_id}>{meta.away.short_name}</Option>
-        </Dropdown>
-        <Tooltip content={s.catchUp} relationship="label">
+        {split && <span className="vb-who">{fill(s.view.viewerN, { n: index + 1 })}</span>}
+        <Tooltip content={s.view.tipMode} relationship="description" positioning="below-start">
+          <Dropdown className="vb-dd" size="small" appearance="filled-darker" aria-label={s.viewer}
+            value={viewer.mode === "analyst" ? s.analyst : s.casual} selectedOptions={[viewer.mode]}
+            onOptionSelect={(_, d) => setViewer({ ...viewer, mode: d.optionValue as Mode })}>
+            <Option value="analyst">{s.analyst}</Option><Option value="casual">{s.casual}</Option>
+          </Dropdown>
+        </Tooltip>
+        <Tooltip content={s.view.tipLang} relationship="description" positioning="below-start">
+          <Dropdown className="vb-dd" size="small" appearance="filled-darker" aria-label={s.language}
+            value={LANG_LABEL[viewer.lang]} selectedOptions={[viewer.lang]}
+            onOptionSelect={(_, d) => setViewer({ ...viewer, lang: d.optionValue as Lang })}>
+            {LANGS.map((l) => <Option key={l} value={l}>{LANG_LABEL[l]}</Option>)}
+          </Dropdown>
+        </Tooltip>
+        <Tooltip content={s.view.tipClub} relationship="description" positioning="below-start">
+          <Dropdown className="vb-dd" size="small" appearance="filled-darker" aria-label={s.club}
+            value={viewer.club ? fill(s.view.fanOf, { club: clubName(viewer.club) }) : s.anyClub} selectedOptions={[viewer.club ?? ""]}
+            onOptionSelect={(_, d) => setViewer({ ...viewer, club: d.optionValue || null })}>
+            <Option value="">{s.anyClub}</Option>
+            <Option value={meta.home.team_id} text={fill(s.view.fanOf, { club: meta.home.short_name })}>{fill(s.view.fanOf, { club: meta.home.short_name })}</Option>
+            <Option value={meta.away.team_id} text={fill(s.view.fanOf, { club: meta.away.short_name })}>{fill(s.view.fanOf, { club: meta.away.short_name })}</Option>
+          </Dropdown>
+        </Tooltip>
+        <Tooltip content={s.view.tipCatchUp} relationship="description">
           <Button size="small" appearance="subtle" icon={<History20Regular />} onClick={() => void catchUp()}>{compact ? "" : s.catchUp}</Button>
         </Tooltip>
         <Tooltip content={s.voice} relationship="label">
@@ -100,12 +132,14 @@ function ViewerColumn({ buf, viewer, setViewer, view, getT, slowT, compact, seek
             icon={voice ? <Speaker220Regular /> : <SpeakerMute20Regular />} />
         </Tooltip>
         {!compact && (
+          <Tooltip content={s.view.tipMetric} relationship="description" positioning="below-start">
           <Dropdown className="vb-dd" size="small" appearance="filled-darker" aria-label={s.metricWord}
             value={`${s.metricWord}: ${viewer.metric ? METRICS[viewer.metric].label[viewer.lang] : s.noMetric}`}
             selectedOptions={[viewer.metric ?? ""]} onOptionSelect={(_, d) => setViewer({ ...viewer, metric: d.optionValue || null })}>
             <Option value="">{s.noMetric}</Option>
             {Object.entries(METRICS).map(([k, m]) => <Option key={k} value={k}>{m.label[viewer.lang]}</Option>)}
           </Dropdown>
+          </Tooltip>
         )}
         {viewer.player && view === "broadcast" && (
           <Tooltip content={s.playerCam} relationship="label">
@@ -114,12 +148,14 @@ function ViewerColumn({ buf, viewer, setViewer, view, getT, slowT, compact, seek
           </Tooltip>
         )}
         {!compact && (
+          <Tooltip content={s.view.tipFollow} relationship="description" positioning="below-start">
           <Dropdown className="vb-dd" size="small" appearance="filled-darker" aria-label={s.player}
             value={`${s.player}: ${playerName(viewer.player)}`} selectedOptions={[viewer.player ?? ""]}
             onOptionSelect={(_, d) => setViewer({ ...viewer, player: d.optionValue || null })}>
             <Option value="">{s.noPlayer}</Option>
             {players.map((p) => <Option key={p.player_id} value={p.player_id} text={`${p.number} ${p.short_name}`}>{p.number} {p.short_name}</Option>)}
           </Dropdown>
+          </Tooltip>
         )}
       </div>
       <div className="stage" dir="ltr">
@@ -132,6 +168,7 @@ function ViewerColumn({ buf, viewer, setViewer, view, getT, slowT, compact, seek
             lang={viewer.lang} fullTime={buf.fullTime && slowT >= buf.liveT - 1} scorecard={buf.scorecard}
             runFor={(id) => buf.runFor(id)} onOpen={setOpen} recap={buf.recap} mode={viewer.mode} onClip={seek} />
           {recap && <Recap card={recap} lang={viewer.lang} onClose={() => setRecap(null)} />}
+          {note && performance.now() < note.until && <div className="viewer-note" role="status">{note.text}</div>}
           {viewer.metric && !buf.fullTime && <MetricFocus buf={buf} meta={meta} metric={viewer.metric} upTo={slowT} lang={viewer.lang} />}
           {viewer.player && !compact && <PlayerHud meta={meta} line={buf.stateAt(slowT)?.players?.[viewer.player]}
             playerId={viewer.player} lang={viewer.lang} />}
@@ -209,7 +246,7 @@ function MatchScreen({ matchId }: { matchId: string }) {
         </TabList>
         <div className="seg" role="group" aria-label={s.layout}>
           {([[1, <Square20Regular key="1" />], [2, <SplitVertical20Regular key="2" />], [4, <Grid20Regular key="4" />]] as const).map(([n, icon]) => (
-            <Tooltip key={n} content={`${n} ${s.layout.toLowerCase()}`} relationship="label">
+            <Tooltip key={n} content={n === 1 ? s.view.layout1 : fill(s.view.layoutN, { n })} relationship="label">
               <ToggleButton size="small" appearance="subtle" icon={icon} checked={layout === n} onClick={() => setLayout(n)} />
             </Tooltip>
           ))}
@@ -227,7 +264,8 @@ function MatchScreen({ matchId }: { matchId: string }) {
       <main className="match-body">
         <div className={`viewers n${layout}`}>
           {shown.map((v, i) => (
-            <ViewerColumn key={i} buf={buf} viewer={v} setViewer={setViewer(i)} view={view} getT={getT} slowT={slow} compact={layout === 4} seek={ph.seek} />
+            <ViewerColumn key={i} buf={buf} viewer={v} setViewer={setViewer(i)} view={view} getT={getT} slowT={slow}
+              compact={layout === 4} split={layout > 1} index={i} seek={ph.seek} />
           ))}
         </div>
         <aside className="side">
