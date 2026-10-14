@@ -1,0 +1,52 @@
+name: power
+
+# Stops or starts the three container apps (the only always-on compute). Stopping deactivates
+# their revisions: nothing runs and nothing is lost. Data, models and configuration stay.
+# On demand only.
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "stop or start"
+        type: choice
+        options: [stop, start]
+        default: stop
+
+jobs:
+  power:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      RG: groundtruth-rg
+    steps:
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: ${{ inputs.action }} the apps
+        run: |
+          set -e
+          for app in groundtruth groundtruth-worker groundtruth-simulator; do
+            if [ "${{ inputs.action }}" = "stop" ]; then
+              for rev in $(az containerapp revision list -g "$RG" -n "$app" --query "[?properties.active].name" -o tsv); do
+                az containerapp revision deactivate -g "$RG" -n "$app" --revision "$rev" -o none
+                echo "stopped $app ($rev)"
+              done
+            else
+              rev=$(az containerapp revision list -g "$RG" -n "$app" --query "sort_by([], &properties.createdTime)[-1].name" -o tsv)
+              az containerapp revision activate -g "$RG" -n "$app" --revision "$rev" -o none
+              echo "started $app ($rev)"
+            fi
+          done
+      - name: What is left
+        run: |
+          for app in groundtruth groundtruth-worker groundtruth-simulator; do
+            echo "== $app"
+            az containerapp revision list -g "$RG" -n "$app" --query "[].{revision:name, active:properties.active, replicas:properties.replicas, running:properties.runningState}" -o table
+          done
+          echo "== everything in $RG"
+          az resource list -g "$RG" --query "[].{name:name, type:type, sku:sku.name}" -o table
